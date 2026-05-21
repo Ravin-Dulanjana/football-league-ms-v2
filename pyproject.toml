@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "football-league-ms"
+version = "0.1.0"
+description = "Football league management system"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "alembic>=1.13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "pre-commit>=3.7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+# ---------------------------------------------------------------------------
+# Ruff — linter and formatter
+# Replaces: black (formatter) + isort (imports) + flake8 (linter)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 88        # PEP 8 recommends 79; 88 is black's default and widely accepted
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors  — spacing, colons, blank lines (PEP 8 §Whitespace)
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes            — unused imports, undefined names (PEP 8 §Imports)
+    "I",   # isort               — stdlib → third-party → local (PEP 8 §Imports)
+    "N",   # pep8-naming         — snake_case functions, PascalCase classes (PEP 8 §Naming)
+    "B",   # flake8-bugbear      — common bug-prone patterns
+    "UP",  # pyupgrade           — use modern Python syntax
+]
+ignore = [
+    "B008",  # FastAPI's Depends() in default arguments is the intended pattern, not a bug
+]
+[tool.ruff.lint.pyupgrade]
+# Both SQLAlchemy (Mapped) and Pydantic resolve annotations at runtime via
+# eval(). On Python 3.9, eval("str | None") raises a TypeError. This flag
+# tells ruff not to suggest X | None rewrites for runtime-evaluated code.
+# Remove this setting once the project upgrades to Python 3.10+.
+keep-runtime-typing = true
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]   # tells ruff that "app" is our code, not a third-party lib
+
+[tool.ruff.format]
+quote-style = "double"        # PEP 8 has no strong opinion; double quotes is the team standard
+
+# ---------------------------------------------------------------------------
+# mypy — static type checker
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.9"
+disallow_untyped_defs = true   # every function must have type annotations
+warn_return_any = true         # warn if a function returns Any (a type-checking escape hatch)
+warn_unused_configs = true
+ignore_missing_imports = true  # don't fail on third-party libs with no stubs
+plugins = ["sqlalchemy.ext.mypy.plugin"]  # teaches mypy how SQLAlchemy ORM types work
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
