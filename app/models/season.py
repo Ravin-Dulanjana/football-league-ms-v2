@@ -1,23 +1,18 @@
 import enum
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     DateTime,
     Enum,
-    ForeignKey,
     Index,
     Integer,
     String,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
-
-if TYPE_CHECKING:
-    from app.models.league import League
 
 
 class SeasonStatus(str, enum.Enum):
@@ -30,12 +25,11 @@ class SeasonStatus(str, enum.Enum):
 class Season(Base):
     __tablename__ = "seasons"
     __table_args__ = (
-        UniqueConstraint("league_id", "year", name="unique_league_year"),
-        Index("ix_seasons_league_status", "league_id", "status"),
+        UniqueConstraint("year", name="unique_year"),
+        Index("ix_seasons_status", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    league_id: Mapped[int] = mapped_column(ForeignKey("leagues.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(128))
     year: Mapped[int] = mapped_column(Integer)
     registration_open_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -47,5 +41,3 @@ class Season(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-
-    league: Mapped["League"] = relationship("League", back_populates="seasons")
