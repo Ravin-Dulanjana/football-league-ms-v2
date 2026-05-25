@@ -1,6 +1,5 @@
 import enum
 from datetime import date, datetime
-from typing import Optional
 
 from sqlalchemy import Date, DateTime, Enum, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -8,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base
 
 
-class PlayerStatus(str, enum.Enum):
+class PlayerStatus(enum.StrEnum):
     PENDING_CLAIM = "pending_claim"
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -22,7 +21,7 @@ class Player(Base):
     full_name: Mapped[str] = mapped_column(String(128))
     date_of_birth: Mapped[date] = mapped_column(Date)
     nic_number: Mapped[str] = mapped_column(String(24), unique=True, index=True)
-    photo_url: Mapped[Optional[str]] = mapped_column(String(512))
+    photo_url: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[PlayerStatus] = mapped_column(
         Enum(PlayerStatus, name="playerstatus"), default=PlayerStatus.PENDING_CLAIM
     )
