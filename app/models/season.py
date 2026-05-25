@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base
 
 
-class SeasonStatus(str, enum.Enum):
+class SeasonStatus(enum.StrEnum):
     DRAFT = "draft"
     OPEN = "open"
     CLOSED = "closed"
