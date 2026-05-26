@@ -10,6 +10,9 @@ repos:
     rev: v2.1.0
     hooks:
       - id: mypy
+        # alembic/ uses runtime-injected op/context objects mypy can't resolve statically.
+        # infra/ is CDK code whose library types aren't installed in the app venv.
+        exclude: ^(alembic/|infra/)
         additional_dependencies:
           - sqlalchemy>=2.0.0
           - pydantic>=2.0.0

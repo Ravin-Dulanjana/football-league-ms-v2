@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str = "postgresql://localhost/football_league"
+    # Used for JWT signing later. Must be overridden in production via .env.
+    secret_key: str = "changeme-insecure-default"
 
     model_config = SettingsConfigDict(
         env_file=".env",
