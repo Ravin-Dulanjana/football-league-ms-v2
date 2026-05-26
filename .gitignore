@@ -31,3 +31,7 @@ env/
 # IDEs
 .vscode/
 .idea/
+
+# AWS CDK
+infra/cdk.out/
+infra/.venv/

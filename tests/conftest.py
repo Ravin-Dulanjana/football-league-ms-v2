@@ -16,7 +16,7 @@ SQLALCHEMY_TEST_URL = "sqlite:///:memory:"
 
 
 @pytest.fixture()
-def db() -> Generator[Session]:
+def db() -> Generator[Session, None, None]:
     engine = create_engine(
         SQLALCHEMY_TEST_URL,
         connect_args={"check_same_thread": False},
@@ -34,8 +34,8 @@ def db() -> Generator[Session]:
 
 
 @pytest.fixture()
-def client(db: Session) -> Generator[TestClient]:
-    def override_get_db() -> Generator[Session]:
+def client(db: Session) -> Generator[TestClient, None, None]:
+    def override_get_db() -> Generator[Session, None, None]:
         yield db
 
     app.dependency_overrides[get_db] = override_get_db

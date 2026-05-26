@@ -6,10 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "football-league-ms"
 version = "0.1.0"
 description = "Football league management system"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "gunicorn>=22.0.0",
     "sqlalchemy>=2.0.0",
     "psycopg2-binary>=2.9.0",
     "pydantic>=2.0.0",
@@ -36,7 +37,7 @@ include = ["app*"]
 # ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 88        # PEP 8 recommends 79; 88 is black's default and widely accepted
-target-version = "py314"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -62,12 +63,15 @@ quote-style = "double"        # PEP 8 has no strong opinion; double quotes is th
 # mypy — static type checker
 # ---------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.11"
 disallow_untyped_defs = true   # every function must have type annotations
 warn_return_any = true         # warn if a function returns Any (a type-checking escape hatch)
 warn_unused_configs = true
 ignore_missing_imports = true  # don't fail on third-party libs with no stubs
 plugins = ["sqlalchemy.ext.mypy.plugin"]  # teaches mypy how SQLAlchemy ORM types work
+# alembic/ uses runtime-injected op/context objects mypy can't see statically.
+# infra/ is CDK code whose library types aren't in the app venv.
+exclude = ["alembic/", "infra/"]
 
 # ---------------------------------------------------------------------------
 # pytest
