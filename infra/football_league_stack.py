@@ -248,8 +248,10 @@ class FootballLeagueStack(Stack):
         instance = ec2.Instance(
             self,
             "EC2",
+            # t3.micro is the free-tier eligible instance in ap-southeast-1.
+            # t2.micro is not available on restricted free-plan accounts.
             instance_type=ec2.InstanceType.of(
-                ec2.InstanceClass.T2, ec2.InstanceSize.MICRO
+                ec2.InstanceClass.T3, ec2.InstanceSize.MICRO
             ),
             machine_image=ec2.MachineImage.latest_amazon_linux2023(),
             vpc=vpc,
