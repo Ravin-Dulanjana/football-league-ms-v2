@@ -23,7 +23,12 @@ class Club(Base):
     email: Mapped[str | None] = mapped_column(String(255))
     logo_url: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[ClubStatus] = mapped_column(
-        Enum(ClubStatus, name="clubstatus"), default=ClubStatus.ACTIVE
+        Enum(
+            ClubStatus,
+            name="clubstatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=ClubStatus.ACTIVE,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

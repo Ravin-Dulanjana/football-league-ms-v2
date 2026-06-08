@@ -23,7 +23,12 @@ class Player(Base):
     nic_number: Mapped[str] = mapped_column(String(24), unique=True, index=True)
     photo_url: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[PlayerStatus] = mapped_column(
-        Enum(PlayerStatus, name="playerstatus"), default=PlayerStatus.PENDING_CLAIM
+        Enum(
+            PlayerStatus,
+            name="playerstatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=PlayerStatus.PENDING_CLAIM,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -21,7 +21,13 @@ alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 # =============================================================================
 # 2. Clone the application repo
+#
+# GIT_TERMINAL_PROMPT=0 prevents git from hanging waiting for credentials
+# when there is no TTY (which is always the case in user-data).  For a public
+# repo this is harmless; for a private repo it surfaces a clear auth error
+# instead of a silent hang.
 # =============================================================================
+export GIT_TERMINAL_PROMPT=0
 git clone "${REPO_URL}" "${APP_DIR}"
 cd "${APP_DIR}"
 git checkout main
@@ -69,30 +75,32 @@ else
     #   (set use_rds=true in cdk.json) which handles backups, failover, etc.
     # -------------------------------------------------------------------------
 
-    # Install from the official PostgreSQL Global Development Group (PGDG) repo
-    # so we get known, stable paths regardless of AL2023 package naming.
-    dnf install -y \
-        https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-    dnf -qy module disable postgresql
+    # Install PostgreSQL 15 from the Amazon Linux 2023 repository.
+    # AL2023 ships postgresql15-server with binaries in /usr/bin/ and the
+    # setup helper at /usr/bin/postgresql-setup (unlike the PGDG packages
+    # which put everything in /usr/pgsql-15/bin/).
     dnf install -y postgresql15-server postgresql15
 
-    # Initialise the database cluster
-    /usr/pgsql-15/bin/postgresql-15-setup initdb
+    # Initialise the database cluster (creates /var/lib/pgsql/data/).
+    postgresql-setup --initdb
 
-    # Configure password authentication over localhost.
-    # AL2023 defaults to "ident" (Unix socket user must match PG user),
-    # which doesn't work with a password in DATABASE_URL.
-    PG_HBA="/var/lib/pgsql/15/data/pg_hba.conf"
-    sed -i 's/ident/md5/g'  "${PG_HBA}"
-    sed -i 's/\bpeer\b/md5/g' "${PG_HBA}"
+    # Configure password authentication for TCP connections.
+    # We keep "peer" for local Unix-socket connections so that
+    # "sudo -u postgres psql" keeps working without a password.
+    # Only the "ident" entries on TCP host lines are changed to "md5"
+    # so the app can connect with a password via DATABASE_URL.
+    PG_HBA="/var/lib/pgsql/data/pg_hba.conf"
+    sed -i '/^host/s/\bident\b/md5/g' "${PG_HBA}"
 
-    systemctl enable postgresql-15
-    systemctl start postgresql-15
+    systemctl enable postgresql
+    systemctl start postgresql
+    sleep 3
 
     # Generate a random password (stored only in .env, never in git)
     DB_PASSWORD=$(python3.11 -c "import secrets; print(secrets.token_hex(16))")
 
-    # Create the application database user and database
+    # Create the application database and set the postgres password.
+    # "sudo -u postgres psql" works because the local socket still uses peer auth.
     sudo -u postgres psql -c \
         "ALTER USER postgres WITH PASSWORD '${DB_PASSWORD}';"
     sudo -u postgres psql -c \
@@ -145,6 +153,10 @@ done
 #   as a systemd service means it restarts automatically on crash or reboot.
 # =============================================================================
 chown -R ec2-user:ec2-user "${APP_DIR}"
+
+# Create log files owned by ec2-user so gunicorn can write them at start-up.
+touch /var/log/gunicorn-access.log /var/log/gunicorn-error.log
+chown ec2-user:ec2-user /var/log/gunicorn-access.log /var/log/gunicorn-error.log
 
 cat > /etc/systemd/system/gunicorn.service << 'UNIT'
 [Unit]

@@ -34,7 +34,11 @@ class PlayerRelease(Base):
         ForeignKey("clubs.id", ondelete="CASCADE")
     )
     status: Mapped[ReleaseStatus] = mapped_column(
-        Enum(ReleaseStatus, name="releasestatus"),
+        Enum(
+            ReleaseStatus,
+            name="releasestatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=ReleaseStatus.PENDING_PLAYER_CONFIRMATION,
     )
     effective_date: Mapped[date | None] = mapped_column(Date)

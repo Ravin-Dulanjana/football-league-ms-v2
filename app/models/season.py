@@ -36,7 +36,12 @@ class Season(Base):
     registration_close_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_locked: Mapped[bool] = mapped_column(default=False)
     status: Mapped[SeasonStatus] = mapped_column(
-        Enum(SeasonStatus, name="seasonstatus"), default=SeasonStatus.DRAFT
+        Enum(
+            SeasonStatus,
+            name="seasonstatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=SeasonStatus.DRAFT,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
