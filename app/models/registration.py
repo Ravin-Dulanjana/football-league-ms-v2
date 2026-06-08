@@ -48,7 +48,11 @@ class RegistrationRequest(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
     requested_by_user_id: Mapped[int] = mapped_column(Integer)
     status: Mapped[RegistrationRequestStatus] = mapped_column(
-        Enum(RegistrationRequestStatus, name="registrationrequeststatus"),
+        Enum(
+            RegistrationRequestStatus,
+            name="registrationrequeststatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=RegistrationRequestStatus.PENDING_PLAYER_CONFIRMATION,
     )
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -75,11 +79,19 @@ class PlayerSeasonRegistration(Base):
     club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"))
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
     registration_type: Mapped[RegistrationType] = mapped_column(
-        Enum(RegistrationType, name="registrationtype"),
+        Enum(
+            RegistrationType,
+            name="registrationtype",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=RegistrationType.NEW,
     )
     status: Mapped[PlayerSeasonRegistrationStatus] = mapped_column(
-        Enum(PlayerSeasonRegistrationStatus, name="playerseasonregistrationstatus"),
+        Enum(
+            PlayerSeasonRegistrationStatus,
+            name="playerseasonregistrationstatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=PlayerSeasonRegistrationStatus.ACTIVE,
     )
     registered_at: Mapped[datetime] = mapped_column(
