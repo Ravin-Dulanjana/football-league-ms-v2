@@ -16,6 +16,7 @@ from app.models.registration import (
     RegistrationType,
 )
 from app.schemas.registration import RegistrationRequestCreate
+from app.services import audit_service
 from app.services.events import publish_event
 
 logger = get_logger(__name__)
@@ -78,6 +79,19 @@ def create_request(
         status=RegistrationRequestStatus.PENDING_PLAYER_CONFIRMATION,
     )
     db.add(req)
+    db.flush()  # get req.id before writing audit log
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="registration_request.create",
+        entity_type="RegistrationRequest",
+        entity_id=req.id,
+        details={
+            "player_id": data.player_id,
+            "club_id": data.club_id,
+            "season_id": data.season_id,
+        },
+    )
     db.commit()
     db.refresh(req)
     logger.info(
@@ -140,6 +154,14 @@ def decide_request(
     if decision == "reject":
         req.status = RegistrationRequestStatus.REJECTED
         req.responded_at = now
+        db.flush()
+        audit_service.write_audit_log(
+            db,
+            actor_id=current_user.id,
+            action="registration_request.reject",
+            entity_type="RegistrationRequest",
+            entity_id=req.id,
+        )
         db.commit()
         db.refresh(req)
         logger.info(
@@ -173,6 +195,14 @@ def decide_request(
         status=PlayerSeasonRegistrationStatus.ACTIVE,
     )
     db.add(registration)
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="registration_request.accept",
+        entity_type="RegistrationRequest",
+        entity_id=req.id,
+    )
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(req)
     logger.info(

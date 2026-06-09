@@ -7,10 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.dependencies import CurrentUser
 from app.middleware.logging import get_logger
 from app.middleware.request_id import request_id_var
 from app.models.season import Season, SeasonStatus
 from app.schemas.season import SeasonCreate, SeasonUpdate
+from app.services import audit_service, notification_service
 
 logger = get_logger(__name__)
 
@@ -62,7 +64,7 @@ def _bump_season_cache() -> None:
     pass
 
 
-def create_season(db: Session, data: SeasonCreate) -> Season:
+def create_season(db: Session, data: SeasonCreate, current_user: CurrentUser) -> Season:
     logger.info(
         {
             "event": "create_season.start",
@@ -73,7 +75,7 @@ def create_season(db: Session, data: SeasonCreate) -> Season:
     season = Season(**data.model_dump(), status=SeasonStatus.DRAFT)
     db.add(season)
     try:
-        db.commit()
+        db.flush()  # get season.id before writing audit / notifications
     except IntegrityError:
         db.rollback()
         logger.error(
@@ -86,6 +88,22 @@ def create_season(db: Session, data: SeasonCreate) -> Season:
             }
         )
         raise
+
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="season.create",
+        entity_type="Season",
+        entity_id=season.id,
+        details={"year": data.year, "name": data.name},
+    )
+    notification_service.notify_by_role(
+        db,
+        role="club_admin",
+        event_type="season.created",
+        message=f"A new season '{season.name}' ({season.year}) has been created.",
+    )
+    db.commit()
     db.refresh(season)
     logger.info(
         {
@@ -99,11 +117,13 @@ def create_season(db: Session, data: SeasonCreate) -> Season:
 
 
 def update_season(
-    db: Session, season: Season, data: SeasonUpdate
+    db: Session, season: Season, data: SeasonUpdate, current_user: CurrentUser
 ) -> tuple[Season, str | None]:
     """
     Returns (updated_season, error_message).
     error_message is None on success, a string description on invalid transition.
+
+    Writes to AuditLog and notifies club_admins on status or lock-state changes.
     """
     logger.info(
         {
@@ -132,8 +152,44 @@ def update_season(
                 f"Allowed: {[s.value for s in allowed] or 'none (terminal state)'}."
             )
 
+    old_status = season.status
+    old_locked = season.is_locked
+
     for field, value in updates.items():
         setattr(season, field, value)
+
+    db.flush()
+
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="season.update",
+        entity_type="Season",
+        entity_id=season.id,
+        details=updates,
+    )
+
+    # Notify club admins of status changes
+    if "status" in updates and season.status != old_status:
+        notification_service.notify_by_role(
+            db,
+            role="club_admin",
+            event_type="season.status_changed",
+            message=(
+                f"Season '{season.name}' status changed to '{season.status.value}'."
+            ),
+        )
+
+    # Notify club admins of lock-state changes
+    if "is_locked" in updates and season.is_locked != old_locked:
+        lock_word = "locked" if season.is_locked else "unlocked"
+        notification_service.notify_by_role(
+            db,
+            role="club_admin",
+            event_type="season.lock_changed",
+            message=f"Season '{season.name}' has been {lock_word}.",
+        )
+
     db.commit()
     db.refresh(season)
     logger.info(

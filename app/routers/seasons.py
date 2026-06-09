@@ -38,10 +38,10 @@ def get_season_public(
 def create_season(
     data: SeasonCreate,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(require_role("super_admin", "league_admin")),
+    current_user: CurrentUser = Depends(require_role("super_admin", "league_admin")),
 ) -> Season:
     try:
-        return season_service.create_season(db, data)
+        return season_service.create_season(db, data, current_user)
     except IntegrityError as err:
         raise HTTPException(
             status.HTTP_409_CONFLICT, "A season for that year already exists."
@@ -53,12 +53,12 @@ def update_season(
     season_id: int,
     data: SeasonUpdate,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(require_role("super_admin", "league_admin")),
+    current_user: CurrentUser = Depends(require_role("super_admin", "league_admin")),
 ) -> Season:
     season = season_service.get_season_by_id(db, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Season not found.")
-    updated, error = season_service.update_season(db, season, data)
+    updated, error = season_service.update_season(db, season, data, current_user)
     if error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, error)
     return updated
