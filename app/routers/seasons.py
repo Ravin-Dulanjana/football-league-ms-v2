@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies import CurrentUser, get_current_user, require_role
+from app.dependencies import CurrentUser, require_role
 from app.models.season import Season
 from app.schemas.season import SeasonCreate, SeasonRead, SeasonUpdate
 from app.services import season_service
@@ -16,9 +16,22 @@ router = APIRouter(prefix="/seasons", tags=["seasons"])
 @router.get("/", response_model=list[SeasonRead])
 def list_seasons(
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(get_current_user),
+    # Public endpoint — no auth required (spec: GET /seasons/ public, cached 180s)
+    # TODO: add Cache-Control: max-age=180 header via response parameter
 ) -> list[Season]:
     return season_service.get_all_seasons(db)
+
+
+@router.get("/{season_id}/", response_model=SeasonRead)
+def get_season_public(
+    season_id: int,
+    db: Session = Depends(get_db),
+    # Public endpoint — no auth required
+) -> Season:
+    season = season_service.get_season_by_id(db, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Season not found.")
+    return season
 
 
 @router.post("/", response_model=SeasonRead, status_code=status.HTTP_201_CREATED)

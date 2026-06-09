@@ -50,6 +50,18 @@ def get_season_by_id(db: Session, season_id: int) -> Season | None:
     return db.get(Season, season_id)
 
 
+def _bump_season_cache() -> None:
+    """
+    Invalidate any cached season responses.
+
+    # TODO: implement with Redis INCR on a namespace version key.
+    # Until Redis is added to the stack, this is a no-op.
+    # Pattern: every cache key includes `season:v{version}:...`.
+    # Incrementing the version instantly invalidates all season cache entries.
+    """
+    pass
+
+
 def create_season(db: Session, data: SeasonCreate) -> Season:
     logger.info(
         {
@@ -82,6 +94,7 @@ def create_season(db: Session, data: SeasonCreate) -> Season:
             "request_id": request_id_var.get(),
         }
     )
+    _bump_season_cache()
     return season
 
 
@@ -130,4 +143,5 @@ def update_season(
             "request_id": request_id_var.get(),
         }
     )
+    _bump_season_cache()
     return season, None
