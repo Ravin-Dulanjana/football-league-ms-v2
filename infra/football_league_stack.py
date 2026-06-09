@@ -491,7 +491,7 @@ class FootballLeagueStack(Stack):
             refresh_token_validity=Duration.days(30),
             # Prevent client from writing custom attributes (read-only for client)
             read_attributes=cognito.ClientAttributes().with_standard_attributes(
-                cognito.StandardAttributesMask(email=True)
+                email=True
             ),
         )
 
