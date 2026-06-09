@@ -46,7 +46,7 @@ from typing import Any
 
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.algorithms import RSAAlgorithm
 from sqlalchemy.orm import Session
@@ -223,6 +223,7 @@ def _decode_token(token: str) -> dict[str, Any]:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
     db: Session = Depends(get_db),
 ) -> CurrentUser:
@@ -236,6 +237,10 @@ def get_current_user(
         app.dependency_overrides[get_current_user] = (
             lambda: CurrentUser(id=1, role="super_admin")
         )
+
+    Phase 7: sets request.state.user_id so LoggingMiddleware can include the
+    authenticated user's ID in the structured request log without having to
+    re-decode the token a second time.
     """
     if credentials is None:
         raise HTTPException(
@@ -249,7 +254,12 @@ def get_current_user(
     # Lazy import to avoid circular imports (user_sync imports from app.models)
     from app.services import user_sync  # noqa: PLC0415
 
-    return user_sync.get_or_create_user(db, claims)
+    user = user_sync.get_or_create_user(db, claims)
+    # Store on request.state so LoggingMiddleware can read it without
+    # re-parsing the token. getattr(request.state, "user_id", None) is
+    # safe for overridden dependencies in tests that don't set this.
+    request.state.user_id = user.id
+    return user
 
 
 # ---------------------------------------------------------------------------

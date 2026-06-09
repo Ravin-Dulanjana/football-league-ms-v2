@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser
+from app.middleware.logging import get_logger
+from app.middleware.request_id import request_id_var
 from app.models.registration import (
     PlayerSeasonRegistration,
     PlayerSeasonRegistrationStatus,
@@ -13,6 +15,8 @@ from app.models.registration import (
 from app.models.release import PlayerRelease, ReleaseDocument, ReleaseStatus
 from app.schemas.release import ReleaseCreate
 from app.services.events import publish_event
+
+logger = get_logger(__name__)
 
 
 def get_all_releases(db: Session) -> list[PlayerRelease]:
@@ -35,6 +39,13 @@ def create_release(
       - no existing release for this registration
     Atomically creates PlayerRelease + ReleaseDocument.
     """
+    logger.info(
+        {
+            "event": "create_release.start",
+            "registration_id": data.registration_id,
+            "request_id": request_id_var.get(),
+        }
+    )
     registration = db.get(PlayerSeasonRegistration, data.registration_id)
     if registration is None:
         return None, "Registration not found."
@@ -67,6 +78,14 @@ def create_release(
     db.add(document)
     db.commit()  # single commit — release + document land together
     db.refresh(release)
+    logger.info(
+        {
+            "event": "create_release.complete",
+            "release_id": release.id,
+            "player_id": release.player_id,
+            "request_id": request_id_var.get(),
+        }
+    )
 
     # Notify club admin that a release has been initiated.
     # release.player and release.from_club lazy-load via the still-open session.
@@ -97,6 +116,14 @@ def decide_release(
     On confirm: atomically marks release CONFIRMED + registration RELEASED.
     On reject: marks release REJECTED only.
     """
+    logger.info(
+        {
+            "event": "decide_release.start",
+            "release_id": release.id,
+            "decision": decision,
+            "request_id": request_id_var.get(),
+        }
+    )
     if current_user.player_id != release.player_id:
         return None, "Only the player being released can decide on this release."
 
@@ -110,6 +137,14 @@ def decide_release(
         release.confirmed_at = now
         db.commit()
         db.refresh(release)
+        logger.info(
+            {
+                "event": "decide_release.complete",
+                "release_id": release.id,
+                "outcome": "rejected",
+                "request_id": request_id_var.get(),
+            }
+        )
         return release, None
 
     # confirm — update both release and registration atomically
@@ -120,6 +155,14 @@ def decide_release(
     registration.released_at = now  # type: ignore[union-attr]
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(release)
+    logger.info(
+        {
+            "event": "decide_release.complete",
+            "release_id": release.id,
+            "outcome": "confirmed",
+            "request_id": request_id_var.get(),
+        }
+    )
     publish_event(
         "release.confirmed",
         {

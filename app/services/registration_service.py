@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser
+from app.middleware.logging import get_logger
+from app.middleware.request_id import request_id_var
 from app.models.registration import (
     PlayerSeasonRegistration,
     PlayerSeasonRegistrationStatus,
@@ -15,6 +17,8 @@ from app.models.registration import (
 )
 from app.schemas.registration import RegistrationRequestCreate
 from app.services.events import publish_event
+
+logger = get_logger(__name__)
 
 
 def get_all_requests(db: Session) -> list[RegistrationRequest]:
@@ -39,6 +43,15 @@ def create_request(
       - registration window must be open
       - player must not already have a registration this season
     """
+    logger.info(
+        {
+            "event": "create_registration_request.start",
+            "player_id": data.player_id,
+            "season_id": data.season_id,
+            "club_id": data.club_id,
+            "request_id": request_id_var.get(),
+        }
+    )
     from app.models.season import Season
     from app.services.season_service import is_registration_window_open
 
@@ -67,6 +80,13 @@ def create_request(
     db.add(req)
     db.commit()
     db.refresh(req)
+    logger.info(
+        {
+            "event": "create_registration_request.complete",
+            "request_id_db": req.id,
+            "request_id": request_id_var.get(),
+        }
+    )
 
     # Notify club admin that a player wants to join.
     # req.club, req.player, req.season are lazy-loaded here via the still-open
@@ -101,6 +121,14 @@ def decide_request(
     On accept: atomically creates PlayerSeasonRegistration + marks request ACCEPTED.
     On reject: marks request REJECTED.
     """
+    logger.info(
+        {
+            "event": "decide_registration_request.start",
+            "request_id_db": req.id,
+            "decision": decision,
+            "request_id": request_id_var.get(),
+        }
+    )
     if current_user.player_id != req.player_id:
         return None, "Only the requested player can decide on their own registration."
 
@@ -114,6 +142,14 @@ def decide_request(
         req.responded_at = now
         db.commit()
         db.refresh(req)
+        logger.info(
+            {
+                "event": "decide_registration_request.complete",
+                "request_id_db": req.id,
+                "outcome": "rejected",
+                "request_id": request_id_var.get(),
+            }
+        )
         publish_event(
             "registration.rejected",
             {
@@ -139,6 +175,14 @@ def decide_request(
     db.add(registration)
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(req)
+    logger.info(
+        {
+            "event": "decide_registration_request.complete",
+            "request_id_db": req.id,
+            "outcome": "accepted",
+            "request_id": request_id_var.get(),
+        }
+    )
     publish_event(
         "registration.accepted",
         {

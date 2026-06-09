@@ -18,6 +18,15 @@ Phase 4 additions (all modes):
       can read from S3; clients never hit the bucket directly
     IAM role S3 policy — scoped to this specific bucket (was resources=["*"])
 
+Phase 7 additions (all modes):
+    CloudWatch Log Groups — /football-league/api (30 day retention)
+                            /football-league/lambda (30 day retention)
+    Custom metric namespace — FootballLeague
+    3 alarms — error rate >1%/5min, p95 latency >500ms/5min, DLQ count >0
+    Dashboard — FootballLeague with request/latency/error/Lambda/DLQ widgets
+    EC2 IAM — cloudwatch:PutMetricData, logs:PutLogEvents, logs:CreateLogStream,
+               logs:DescribeLogStreams, logs:CreateLogGroup
+
 To switch modes:
   cdk.json  →  "use_rds": "true"    (requires a real AWS account with RDS access)
   cdk.json  →  "use_rds": "false"   (works on any account — PostgreSQL on EC2)
@@ -35,11 +44,16 @@ from aws_cdk import (
 )
 from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import aws_cloudwatch as cloudwatch
+from aws_cdk import (
+    aws_cloudwatch_actions as cw_actions,  # noqa: F401 (imported for future SNS)
+)
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as event_sources
+from aws_cdk import aws_logs as logs
 from aws_cdk import aws_rds as rds
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_ses as ses
@@ -226,6 +240,39 @@ class FootballLeagueStack(Stack):
         )
 
         # ---------------------------------------------------------------
+        # Phase 7 — CloudWatch observability IAM permissions
+        #
+        # PutMetricData: LoggingMiddleware publishes RequestCount,
+        #   RequestDuration, ErrorCount custom metrics on every request.
+        #   Resource must be "*" — PutMetricData does not support
+        #   resource-level restrictions.
+        #
+        # Logs permissions: CloudWatch agent needs these to create and
+        #   write to log streams in /football-league/api.
+        #   CreateLogGroup is included so the agent can bootstrap cleanly
+        #   even if the Log Group CDK resource hasn't been created yet.
+        # ---------------------------------------------------------------
+        instance_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="CloudWatchPutMetrics",
+                actions=["cloudwatch:PutMetricData"],
+                resources=["*"],
+            )
+        )
+        instance_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="CloudWatchLogsWrite",
+                actions=[
+                    "logs:PutLogEvents",
+                    "logs:CreateLogStream",
+                    "logs:DescribeLogStreams",
+                    "logs:CreateLogGroup",
+                ],
+                resources=["arn:aws:logs:*:*:log-group:/football-league/*"],
+            )
+        )
+
+        # ---------------------------------------------------------------
         # 4. SQS — notification queue + dead letter queue
         #
         # Standard queue (not FIFO): notification ordering doesn't matter
@@ -344,6 +391,35 @@ class FootballLeagueStack(Stack):
         )
 
         # ---------------------------------------------------------------
+        # Phase 7. CloudWatch Log Groups
+        #
+        # Pre-creating the Log Groups with explicit retention lets us:
+        #   a) Set 30-day retention (default is never-expire → costs grow forever)
+        #   b) Avoid the Lambda auto-created group inheriting the 90-day default
+        #
+        # /football-league/api    — application JSON logs (shipped by CW agent)
+        # /football-league/lambda — Lambda notification handler logs
+        #                           (Lambda auto-creates its group on first run,
+        #                            but our group with the right retention wins
+        #                            because it already exists)
+        # ---------------------------------------------------------------
+        api_log_group = logs.LogGroup(
+            self,
+            "ApiLogGroup",
+            log_group_name="/football-league/api",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        logs.LogGroup(
+            self,
+            "LambdaLogGroup",
+            log_group_name="/football-league/lambda",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        # ---------------------------------------------------------------
         # 7. Cognito — User Pool + Client
         #
         # User Pool:  the user directory. Email-only sign-in. Self sign-up
@@ -424,6 +500,245 @@ class FootballLeagueStack(Stack):
         jwks_url = (
             f"https://cognito-idp.{self.region}.amazonaws.com"
             f"/{user_pool.user_pool_id}/.well-known/jwks.json"
+        )
+
+        # ---------------------------------------------------------------
+        # Phase 7b. CloudWatch Alarms
+        #
+        # All three alarms use the FootballLeague custom namespace published
+        # by LoggingMiddleware via PutMetricData.
+        #
+        # Error Rate Alarm
+        # ────────────────
+        # Metric math: ErrorCount / RequestCount = error fraction.
+        # threshold: 0.01 = 1%.  Period: 5 minutes.
+        # Why MathExpression: dividing two metrics requires metric math —
+        #   you can't threshold a ratio with a single-metric alarm.
+        # treat_missing_data=NOT_BREACHING: if there are no requests in the
+        #   window (RequestCount = 0), the result is NaN → don't alarm.
+        #
+        # p95 Latency Alarm
+        # ─────────────────
+        # Uses the p95 statistic on RequestDuration.
+        # Why p95 not average: an average hides tail latency; 5% of users
+        #   could be waiting 2s while the average stays under 200ms.
+        #
+        # DLQ Alarm
+        # ─────────
+        # Watches ApproximateNumberOfMessagesVisible on the DLQ.
+        # Any message > 0 means the notification Lambda failed 3 times.
+        # ---------------------------------------------------------------
+        error_count_metric = cloudwatch.Metric(
+            namespace="FootballLeague",
+            metric_name="ErrorCount",
+            statistic="Sum",
+            period=Duration.minutes(5),
+            dimensions_map={"Path": "all"},
+        )
+        request_count_metric = cloudwatch.Metric(
+            namespace="FootballLeague",
+            metric_name="RequestCount",
+            statistic="Sum",
+            period=Duration.minutes(5),
+            dimensions_map={"Path": "all"},
+        )
+
+        # Error rate = ErrorCount / RequestCount  (fraction, not %)
+        error_rate_expr = cloudwatch.MathExpression(
+            expression="errors / requests",
+            using_metrics={
+                "errors": error_count_metric,
+                "requests": request_count_metric,
+            },
+            period=Duration.minutes(5),
+            label="Error rate (fraction)",
+        )
+
+        error_rate_alarm = cloudwatch.Alarm(
+            self,
+            "ErrorRateAlarm",
+            metric=error_rate_expr,
+            threshold=0.01,  # 1%
+            evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            alarm_description=(
+                "API error rate exceeded 1% over the last 5 minutes. "
+                "SLO: <1% of requests may return 5xx."
+            ),
+            alarm_name="FootballLeague-ErrorRate",
+        )
+
+        latency_p95_alarm = cloudwatch.Alarm(
+            self,
+            "LatencyP95Alarm",
+            metric=cloudwatch.Metric(
+                namespace="FootballLeague",
+                metric_name="RequestDuration",
+                # p95 statistic: 95% of requests must be faster than this
+                statistic="p95",
+                period=Duration.minutes(5),
+                dimensions_map={"Path": "all"},
+            ),
+            threshold=500,  # 500 ms
+            evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            alarm_description=(
+                "p95 request latency exceeded 500ms over the last 5 minutes. "
+                "SLO: 95th percentile response time must be <500ms."
+            ),
+            alarm_name="FootballLeague-LatencyP95",
+        )
+
+        dlq_alarm = cloudwatch.Alarm(
+            self,
+            "DLQAlarm",
+            metric=notification_dlq.metric_approximate_number_of_messages_visible(
+                period=Duration.minutes(1),
+            ),
+            threshold=1,
+            evaluation_periods=1,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            alarm_description=(
+                "Messages are stuck in the notification DLQ. "
+                "The notification Lambda failed 3 times for at least one message. "
+                "Inspect the DLQ and check Lambda error logs."
+            ),
+            alarm_name="FootballLeague-DLQ",
+        )
+
+        # ---------------------------------------------------------------
+        # Phase 7c. CloudWatch Dashboard
+        #
+        # One dashboard = one screen. Widgets are arranged in a grid.
+        # Each row is 24 units wide; widget width is configurable.
+        #
+        # Row 1: Traffic overview — request count/min, error rate %
+        # Row 2: Latency percentiles — p50, p95, p99
+        # Row 3: Lambda health — invocation count, error count
+        # Row 4: DLQ depth — messages visible in the dead letter queue
+        # Row 5: Alarm status widgets — quick red/green health check
+        # ---------------------------------------------------------------
+        cloudwatch.Dashboard(
+            self,
+            "FootballLeagueDashboard",
+            dashboard_name="FootballLeague",
+            widgets=[
+                # Row 1 — Traffic
+                [
+                    cloudwatch.GraphWidget(
+                        title="Request Count / min",
+                        left=[
+                            cloudwatch.Metric(
+                                namespace="FootballLeague",
+                                metric_name="RequestCount",
+                                statistic="Sum",
+                                period=Duration.minutes(1),
+                                label="Requests/min",
+                            )
+                        ],
+                        width=12,
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Error Rate %",
+                        left=[
+                            cloudwatch.MathExpression(
+                                expression="(errors / requests) * 100",
+                                using_metrics={
+                                    "errors": cloudwatch.Metric(
+                                        namespace="FootballLeague",
+                                        metric_name="ErrorCount",
+                                        statistic="Sum",
+                                        period=Duration.minutes(1),
+                                    ),
+                                    "requests": cloudwatch.Metric(
+                                        namespace="FootballLeague",
+                                        metric_name="RequestCount",
+                                        statistic="Sum",
+                                        period=Duration.minutes(1),
+                                    ),
+                                },
+                                label="Error %",
+                            )
+                        ],
+                        width=12,
+                    ),
+                ],
+                # Row 2 — Latency percentiles
+                [
+                    cloudwatch.GraphWidget(
+                        title="Latency Percentiles (ms)",
+                        left=[
+                            cloudwatch.Metric(
+                                namespace="FootballLeague",
+                                metric_name="RequestDuration",
+                                statistic="p50",
+                                period=Duration.minutes(1),
+                                label="p50",
+                            ),
+                            cloudwatch.Metric(
+                                namespace="FootballLeague",
+                                metric_name="RequestDuration",
+                                statistic="p95",
+                                period=Duration.minutes(1),
+                                label="p95",
+                            ),
+                            cloudwatch.Metric(
+                                namespace="FootballLeague",
+                                metric_name="RequestDuration",
+                                statistic="p99",
+                                period=Duration.minutes(1),
+                                label="p99",
+                            ),
+                        ],
+                        width=24,
+                    ),
+                ],
+                # Row 3 — Lambda health
+                [
+                    cloudwatch.GraphWidget(
+                        title="Lambda Invocations",
+                        left=[
+                            notification_fn.metric_invocations(
+                                period=Duration.minutes(1),
+                                label="Invocations",
+                            )
+                        ],
+                        width=12,
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Lambda Errors",
+                        left=[
+                            notification_fn.metric_errors(
+                                period=Duration.minutes(1),
+                                label="Errors",
+                            )
+                        ],
+                        width=12,
+                    ),
+                ],
+                # Row 4 — DLQ depth
+                [
+                    cloudwatch.GraphWidget(
+                        title="Notification DLQ Depth",
+                        left=[
+                            notification_dlq.metric_approximate_number_of_messages_visible(
+                                period=Duration.minutes(1),
+                                label="DLQ Messages",
+                            )
+                        ],
+                        width=24,
+                    ),
+                ],
+                # Row 5 — Alarm status overview
+                [
+                    cloudwatch.AlarmStatusWidget(
+                        title="SLO Alarms",
+                        alarms=[error_rate_alarm, latency_p95_alarm, dlq_alarm],
+                        width=24,
+                    ),
+                ],
+            ],
         )
 
         # ---------------------------------------------------------------
@@ -518,6 +833,8 @@ class FootballLeagueStack(Stack):
             f'export COGNITO_CLIENT_ID="{user_pool_client.user_pool_client_id}"',
             f'export COGNITO_REGION="{self.region}"',
             f'export COGNITO_JWKS_URL="{jwks_url}"',
+            # Phase 7 — CloudWatch observability
+            'export CLOUDWATCH_NAMESPACE="FootballLeague"',
         )
 
         script_path = os.path.join(os.path.dirname(__file__), "user_data.sh")
@@ -649,4 +966,19 @@ class FootballLeagueStack(Stack):
             "CognitoJwksUrl",
             value=jwks_url,
             description="JWKS URL for JWT verification — set as COGNITO_JWKS_URL in .env",  # noqa: E501
+        )
+        CfnOutput(
+            self,
+            "ApiLogGroupName",
+            value=api_log_group.log_group_name,
+            description="CloudWatch Log Group for API structured JSON logs",
+        )
+        CfnOutput(
+            self,
+            "CloudWatchDashboard",
+            value=(
+                f"https://{self.region}.console.aws.amazon.com/cloudwatch/home"
+                f"?region={self.region}#dashboards:name=FootballLeague"
+            ),
+            description="CloudWatch dashboard URL",
         )

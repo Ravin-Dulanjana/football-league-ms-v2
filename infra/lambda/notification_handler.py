@@ -24,12 +24,56 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import boto3
 
+# ---------------------------------------------------------------------------
+# Structured JSON logger for Lambda.
+#
+# Lambda captures stdout/stderr and ships each line to CloudWatch Logs
+# automatically (group /aws/lambda/<function-name>).
+#
+# By emitting one JSON object per line, CloudWatch Logs Insights can query
+# individual fields:
+#   fields event_type, recipient, success, duration_ms
+#   | filter success = false
+#   | sort @timestamp desc
+#
+# ⚠️  NEVER log passwords, full JWT tokens, or NIC numbers here.
+#     SES recipient email addresses ARE safe to log (they are already in
+#     the CloudWatch group scoped to this Lambda function, not the API logs).
+# ---------------------------------------------------------------------------
+
+
+class _JsonFormatter(logging.Formatter):
+    """Render LogRecord as a single JSON line."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        data: dict[str, Any] = {
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "level": record.levelname,
+        }
+        if isinstance(record.msg, dict):
+            data.update(record.msg)
+        else:
+            data["message"] = record.getMessage()
+        if record.exc_info:
+            data["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(data, default=str)
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonFormatter())
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+if not logger.handlers:
+    logger.addHandler(_handler)
+# propagate=True (default) so pytest's caplog can capture records.
+# In Lambda, the root logger has no handlers by default so there are no
+# duplicate lines.
 
 SES_SENDER_EMAIL: str = os.environ.get("SES_SENDER_EMAIL", "")
 SES_REGION: str = os.environ.get("SES_REGION", "ap-southeast-1")
@@ -126,21 +170,36 @@ def _process_message(body: dict[str, Any]) -> None:
 
     template = _TEMPLATES.get(event_type)
     if template is None:
-        logger.warning("Unknown event_type '%s' — discarding message", event_type)
+        logger.warning(
+            {"event": "notification.unknown_event_type", "event_type": event_type}
+        )
         return
 
     recipient = payload.get("recipient_email")
     if not recipient:
         logger.warning(
-            "No recipient_email in payload for event_type '%s' — discarding",
-            event_type,
+            {
+                "event": "notification.missing_recipient",
+                "event_type": event_type,
+            }
         )
         return
 
+    start = time.monotonic()
     subject = template["subject"].format(**payload)
     body_text = template["body"].format(**payload)
     _send_email(str(recipient), subject, body_text)
-    logger.info("Sent notification: event_type=%s recipient=%s", event_type, recipient)
+    duration_ms = round((time.monotonic() - start) * 1000, 2)
+
+    logger.info(
+        {
+            "event": "notification.sent",
+            "event_type": event_type,
+            "recipient": str(recipient),
+            "success": True,
+            "duration_ms": duration_ms,
+        }
+    )
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -152,15 +211,39 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     timeout expires. After max_receive_count retries, the message is moved
     to the dead letter queue automatically.
     """
+    records = event.get("Records", [])
+    logger.info(
+        {
+            "event": "lambda.invocation.start",
+            "batch_size": len(records),
+        }
+    )
+
     batch_item_failures: list[dict[str, str]] = []
 
-    for record in event.get("Records", []):
+    for record in records:
         message_id: str = record["messageId"]
         try:
             body = json.loads(record["body"])
             _process_message(body)
-        except Exception:
-            logger.exception("Failed to process SQS message %s", message_id)
+        except Exception as exc:
+            logger.error(
+                {
+                    "event": "notification.error",
+                    "message_id": message_id,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                    "success": False,
+                }
+            )
             batch_item_failures.append({"itemIdentifier": message_id})
+
+    logger.info(
+        {
+            "event": "lambda.invocation.complete",
+            "batch_size": len(records),
+            "failures": len(batch_item_failures),
+        }
+    )
 
     return {"batchItemFailures": batch_item_failures}
