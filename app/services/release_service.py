@@ -14,6 +14,7 @@ from app.models.registration import (
 )
 from app.models.release import PlayerRelease, ReleaseDocument, ReleaseStatus
 from app.schemas.release import ReleaseCreate
+from app.services import audit_service
 from app.services.events import publish_event
 
 logger = get_logger(__name__)
@@ -76,7 +77,20 @@ def create_release(
         file_name=data.file_name,
     )
     db.add(document)
-    db.commit()  # single commit — release + document land together
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="release.create",
+        entity_type="PlayerRelease",
+        entity_id=release.id,
+        details={
+            "player_id": release.player_id,
+            "from_club_id": release.from_club_id,
+            "registration_id": data.registration_id,
+        },
+    )
+    db.commit()  # single commit — release + document + audit land together
     db.refresh(release)
     logger.info(
         {
@@ -135,6 +149,14 @@ def decide_release(
     if decision == "reject":
         release.status = ReleaseStatus.REJECTED
         release.confirmed_at = now
+        db.flush()
+        audit_service.write_audit_log(
+            db,
+            actor_id=current_user.id,
+            action="release.reject",
+            entity_type="PlayerRelease",
+            entity_id=release.id,
+        )
         db.commit()
         db.refresh(release)
         logger.info(
@@ -153,6 +175,14 @@ def decide_release(
     registration = db.get(PlayerSeasonRegistration, release.registration_id)
     registration.status = PlayerSeasonRegistrationStatus.RELEASED  # type: ignore[union-attr]
     registration.released_at = now  # type: ignore[union-attr]
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="release.confirm",
+        entity_type="PlayerRelease",
+        entity_id=release.id,
+    )
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(release)
     logger.info(

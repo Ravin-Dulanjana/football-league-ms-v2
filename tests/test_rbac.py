@@ -575,3 +575,398 @@ def test_audit_log_written_for_deactivate_action(
     assert logs[0].details is not None
     details = json.loads(logs[0].details)
     assert "reason" in details
+
+
+# ---------------------------------------------------------------------------
+# Tests 12–19: AuditLog and notification coverage (gap fill)
+# ---------------------------------------------------------------------------
+
+
+def test_season_create_writes_audit_log(db: Session) -> None:
+    """
+    Test 12: POST /seasons/ must write an AuditLog row with action='season.create'.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.audit_log import AuditLog  # noqa: PLC0415
+
+    league_admin = CurrentUser(id=50, role="league_admin")
+    with make_client(db, league_admin) as c:
+        response = c.post(
+            "/seasons/",
+            json={
+                "name": "Audit Test Season",
+                "year": 2030,
+                "registration_open_at": "2030-01-01T00:00:00Z",
+                "registration_close_at": "2030-06-30T00:00:00Z",
+            },
+        )
+    assert response.status_code == 201, response.text
+    season_id = response.json()["id"]
+
+    logs = (
+        db.execute(
+            select(AuditLog).where(
+                AuditLog.action == "season.create",
+                AuditLog.entity_id == season_id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(logs) == 1
+    assert logs[0].actor_id == league_admin.id
+
+
+def test_season_create_notifies_club_admins(db: Session) -> None:
+    """
+    Test 13: POST /seasons/ must create Notification rows for every active club_admin.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.notification import Notification  # noqa: PLC0415
+    from app.models.user import User  # noqa: PLC0415
+
+    # Create two club_admin users so we can assert both are notified
+    club_admin_a = User(
+        cognito_sub="ca-notify-a",
+        email="ca-notify-a@test.com",
+        role="club_admin",
+        is_active=True,
+        is_deleted=False,
+    )
+    club_admin_b = User(
+        cognito_sub="ca-notify-b",
+        email="ca-notify-b@test.com",
+        role="club_admin",
+        is_active=True,
+        is_deleted=False,
+    )
+    db.add_all([club_admin_a, club_admin_b])
+    db.commit()
+    db.refresh(club_admin_a)
+    db.refresh(club_admin_b)
+
+    super_admin = CurrentUser(id=999, role="super_admin")
+    with make_client(db, super_admin) as c:
+        response = c.post(
+            "/seasons/",
+            json={
+                "name": "Notification Test Season",
+                "year": 2031,
+                "registration_open_at": "2031-01-01T00:00:00Z",
+                "registration_close_at": "2031-06-30T00:00:00Z",
+            },
+        )
+    assert response.status_code == 201, response.text
+
+    # Both club_admin users should have received a notification
+    for uid in (club_admin_a.id, club_admin_b.id):
+        notif = db.execute(
+            select(Notification).where(
+                Notification.user_id == uid,
+                Notification.event_type == "season.created",
+            )
+        ).scalar_one_or_none()
+        assert notif is not None, f"No notification for club_admin id={uid}"
+
+
+def test_season_status_change_writes_audit_and_notifies(db: Session) -> None:
+    """
+    Test 14: PATCH /seasons/{id}/ with a status change must write AuditLog
+    AND create Notification rows for club_admins.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.audit_log import AuditLog  # noqa: PLC0415
+    from app.models.notification import Notification  # noqa: PLC0415
+    from app.models.user import User  # noqa: PLC0415
+
+    # Plant a club_admin to receive the notification
+    watcher = User(
+        cognito_sub="ca-status-watcher",
+        email="watcher@test.com",
+        role="club_admin",
+        is_active=True,
+        is_deleted=False,
+    )
+    db.add(watcher)
+    db.commit()
+    db.refresh(watcher)
+
+    # Create a draft season directly in DB (bypasses the service, avoids audit noise)
+    draft_season = Season(
+        name="Status Change Season",
+        year=2032,
+        registration_open_at=datetime.now(tz=UTC) + timedelta(days=1),
+        registration_close_at=datetime.now(tz=UTC) + timedelta(days=60),
+        status=SeasonStatus.DRAFT,
+        is_locked=False,
+    )
+    db.add(draft_season)
+    db.commit()
+    db.refresh(draft_season)
+
+    super_admin = CurrentUser(id=999, role="super_admin")
+    with make_client(db, super_admin) as c:
+        response = c.patch(
+            f"/seasons/{draft_season.id}/",
+            json={"status": "open"},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "open"
+
+    # Audit log written
+    log = db.execute(
+        select(AuditLog).where(
+            AuditLog.action == "season.update",
+            AuditLog.entity_id == draft_season.id,
+        )
+    ).scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == super_admin.id
+
+    # Notification sent to the club_admin
+    notif = db.execute(
+        select(Notification).where(
+            Notification.user_id == watcher.id,
+            Notification.event_type == "season.status_changed",
+        )
+    ).scalar_one_or_none()
+    assert notif is not None
+
+
+def test_profile_submit_notifies_league_admins(db: Session) -> None:
+    """
+    Test 15: Submitting a club season profile must create Notification rows
+    for all league_admins.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.notification import Notification  # noqa: PLC0415
+    from app.models.user import User  # noqa: PLC0415
+
+    season = _open_season(db)
+    club = _club(db, "Submit Notif Club", "SNC")
+
+    # Plant a league_admin to receive the notification
+    la = User(
+        cognito_sub="la-submit-notif",
+        email="la-submit@test.com",
+        role="league_admin",
+        is_active=True,
+        is_deleted=False,
+    )
+    db.add(la)
+    db.commit()
+    db.refresh(la)
+
+    # Create profile directly in DB
+    profile = ClubSeasonProfile(
+        club_id=club.id,
+        season_id=season.id,
+        status=ClubSeasonProfileStatus.DRAFT,
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
+    with make_client(db, club_admin) as c:
+        response = c.post(f"/club-season-profiles/{profile.id}/submit/")
+
+    assert response.status_code == 200, response.text
+
+    notif = db.execute(
+        select(Notification).where(
+            Notification.user_id == la.id,
+            Notification.event_type == "club_profile.submitted",
+        )
+    ).scalar_one_or_none()
+    assert notif is not None
+
+
+def test_profile_transition_notifies_club_admin(db: Session) -> None:
+    """
+    Test 16: Transitioning a club season profile must notify the club's
+    own club_admin(s).
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.notification import Notification  # noqa: PLC0415
+    from app.models.user import User  # noqa: PLC0415
+
+    season = _open_season(db)
+    club = _club(db, "Transition Notif Club", "TNC")
+
+    # Plant a club_admin for this specific club
+    ca = User(
+        cognito_sub="ca-transition-notif",
+        email="ca-transition@test.com",
+        role="club_admin",
+        club_id=club.id,
+        is_active=True,
+        is_deleted=False,
+    )
+    db.add(ca)
+    db.commit()
+    db.refresh(ca)
+
+    profile = ClubSeasonProfile(
+        club_id=club.id,
+        season_id=season.id,
+        status=ClubSeasonProfileStatus.SUBMITTED,
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    super_admin = CurrentUser(id=999, role="super_admin")
+    with make_client(db, super_admin) as c:
+        response = c.post(
+            f"/club-season-profiles/{profile.id}/transition/",
+            json={"target_status": "reviewed"},
+        )
+
+    assert response.status_code == 200, response.text
+
+    notif = db.execute(
+        select(Notification).where(
+            Notification.user_id == ca.id,
+            Notification.event_type == "club_profile.transitioned",
+        )
+    ).scalar_one_or_none()
+    assert notif is not None
+
+
+def test_registration_request_create_writes_audit_log(db: Session) -> None:
+    """
+    Test 17: POST /registration-requests/ must write an AuditLog row.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.audit_log import AuditLog  # noqa: PLC0415
+    from app.models.player import Player  # noqa: PLC0415
+
+    season = _open_season(db)
+    club = _club(db, "Reg Audit Club", "RAC")
+    player = Player(
+        league_player_code="P-AUDIT-001",
+        full_name="Audit Player",
+        date_of_birth=date(1998, 5, 10),
+        nic_number="NIC-AUDIT-001",
+    )
+    db.add(player)
+    db.commit()
+    db.refresh(player)
+
+    club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
+    with make_client(db, club_admin) as c:
+        response = c.post(
+            "/registration-requests/",
+            json={
+                "player_id": player.id,
+                "season_id": season.id,
+                "club_id": club.id,
+            },
+        )
+    assert response.status_code == 201, response.text
+    req_id = response.json()["id"]
+
+    log = db.execute(
+        select(AuditLog).where(
+            AuditLog.action == "registration_request.create",
+            AuditLog.entity_id == req_id,
+        )
+    ).scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == club_admin.id
+
+
+def test_release_create_writes_audit_log(db: Session) -> None:
+    """
+    Test 18: POST /releases/ must write an AuditLog row with action='release.create'.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.audit_log import AuditLog  # noqa: PLC0415
+    from app.models.player import Player  # noqa: PLC0415
+    from app.models.registration import (  # noqa: PLC0415
+        PlayerSeasonRegistration,
+        PlayerSeasonRegistrationStatus,
+        RegistrationType,
+    )
+
+    season = _open_season(db)
+    club = _club(db, "Release Audit Club", "RAUC")
+    player = Player(
+        league_player_code="P-RELEASE-001",
+        full_name="Release Audit Player",
+        date_of_birth=date(1996, 3, 20),
+        nic_number="NIC-RELEASE-001",
+    )
+    db.add(player)
+    db.commit()
+    db.refresh(player)
+
+    reg = PlayerSeasonRegistration(
+        season_id=season.id,
+        club_id=club.id,
+        player_id=player.id,
+        registration_type=RegistrationType.NEW,
+        status=PlayerSeasonRegistrationStatus.ACTIVE,
+    )
+    db.add(reg)
+    db.commit()
+    db.refresh(reg)
+
+    club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
+    with make_client(db, club_admin) as c:
+        response = c.post(
+            "/releases/",
+            json={
+                "registration_id": reg.id,
+                "s3_key": "releases/documents/test-release.pdf",
+                "file_name": "test-release.pdf",
+                "effective_date": "2030-06-01",
+            },
+        )
+    assert response.status_code == 201, response.text
+    release_id = response.json()["id"]
+
+    log = db.execute(
+        select(AuditLog).where(
+            AuditLog.action == "release.create",
+            AuditLog.entity_id == release_id,
+        )
+    ).scalar_one_or_none()
+    assert log is not None
+    assert log.actor_id == club_admin.id
+
+
+def test_invalid_season_status_transition_rejected(db: Session) -> None:
+    """
+    Test 19: PATCH /seasons/{id}/ with an invalid status jump (draft→archived)
+    must return 400.  This is a direct re-test of the VALID_TRANSITIONS guard
+    now that the route captures current_user properly.
+    """
+    draft_season = Season(
+        name="Invalid Transition Season",
+        year=2033,
+        registration_open_at=datetime.now(tz=UTC) + timedelta(days=1),
+        registration_close_at=datetime.now(tz=UTC) + timedelta(days=60),
+        status=SeasonStatus.DRAFT,
+        is_locked=False,
+    )
+    db.add(draft_season)
+    db.commit()
+    db.refresh(draft_season)
+
+    super_admin = CurrentUser(id=999, role="super_admin")
+    with make_client(db, super_admin) as c:
+        response = c.patch(
+            f"/seasons/{draft_season.id}/",
+            json={"status": "archived"},
+        )
+    assert response.status_code == 400, response.text
+    assert "Cannot transition" in response.json()["detail"]

@@ -48,7 +48,7 @@ from app.schemas.club_season import (
     CommentCreate,
     UnlockRequestCreate,
 )
-from app.services import audit_service
+from app.services import audit_service, notification_service
 from app.services.season_service import is_registration_window_open
 
 logger = get_logger(__name__)
@@ -155,6 +155,16 @@ def submit_profile(
         entity_id=profile.id,
         details={"new_status": new_status.value},
     )
+    # Notify all league admins that a club profile has been submitted for review
+    notification_service.notify_by_role(
+        db,
+        role="league_admin",
+        event_type="club_profile.submitted",
+        message=(
+            f"Club profile (id={profile.id}) for club {profile.club_id} "
+            f"has been {new_status.value} and is awaiting review."
+        ),
+    )
     db.commit()
     db.refresh(profile)
     return profile, None
@@ -214,6 +224,17 @@ def transition_profile(
         entity_type="ClubSeasonProfile",
         entity_id=profile.id,
         details={"from": profile.status.value, "to": target.value},
+    )
+    # Notify the club_admin(s) for this specific club about the status change
+    notification_service.notify_by_role(
+        db,
+        role="club_admin",
+        event_type="club_profile.transitioned",
+        message=(
+            f"Your club's season profile (id={profile.id}) has been "
+            f"moved to '{target.value}'."
+        ),
+        club_id=profile.club_id,
     )
     db.commit()
     db.refresh(profile)
@@ -344,6 +365,35 @@ def add_staff(
         role=data.role,
     )
     db.add(staff)
+    db.flush()
+
+    # If the club profile is already submitted/approved, alert league admins
+    # that a staff change happened after submission.
+    submitted_statuses = [
+        ClubSeasonProfileStatus.SUBMITTED,
+        ClubSeasonProfileStatus.RESUBMITTED,
+        ClubSeasonProfileStatus.REVIEWED,
+        ClubSeasonProfileStatus.APPROVED,
+    ]
+    profile_submitted = db.execute(
+        select(ClubSeasonProfile).where(
+            ClubSeasonProfile.club_id == data.club_id,
+            ClubSeasonProfile.season_id == data.season_id,
+            ClubSeasonProfile.status.in_(submitted_statuses),
+        )
+    ).scalar_one_or_none()
+
+    if profile_submitted is not None:
+        notification_service.notify_by_role(
+            db,
+            role="league_admin",
+            event_type="club_staff.added_post_submission",
+            message=(
+                f"Club {data.club_id} added staff member '{data.full_name}' "
+                f"after profile submission (profile id={profile_submitted.id})."
+            ),
+        )
+
     db.commit()
     db.refresh(staff)
     return staff, None
@@ -364,7 +414,40 @@ def remove_staff(
     ):
         return False, "Registration window is closed."
 
+    # Capture details before deletion for the notification message
+    staff_name = staff.full_name
+    staff_club_id = staff.club_id
+    staff_season_id = staff.season_id
+
+    # Check if the club profile is already submitted/approved before deleting
+    submitted_statuses = [
+        ClubSeasonProfileStatus.SUBMITTED,
+        ClubSeasonProfileStatus.RESUBMITTED,
+        ClubSeasonProfileStatus.REVIEWED,
+        ClubSeasonProfileStatus.APPROVED,
+    ]
+    profile_submitted = db.execute(
+        select(ClubSeasonProfile).where(
+            ClubSeasonProfile.club_id == staff_club_id,
+            ClubSeasonProfile.season_id == staff_season_id,
+            ClubSeasonProfile.status.in_(submitted_statuses),
+        )
+    ).scalar_one_or_none()
+
     db.delete(staff)
+    db.flush()
+
+    if profile_submitted is not None:
+        notification_service.notify_by_role(
+            db,
+            role="league_admin",
+            event_type="club_staff.removed_post_submission",
+            message=(
+                f"Club {staff_club_id} removed staff member '{staff_name}' "
+                f"after profile submission (profile id={profile_submitted.id})."
+            ),
+        )
+
     db.commit()
     return True, None
 
