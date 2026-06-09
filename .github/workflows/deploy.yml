@@ -66,10 +66,12 @@ jobs:
   # Opens an SSH connection to the EC2 and runs a deploy script.
   #
   # The deploy script is idempotent — safe to run multiple times:
-  #   git pull      — no-op if already up to date
-  #   pip install   — skips already-installed packages
-  #   alembic       — no-op if already at head
-  #   systemctl     — restart is always applied (picks up new code)
+  #   git fetch + reset — forces EC2 to exactly match origin/main, discarding
+  #                       any local edits (safer than `git pull` which aborts
+  #                       when uncommitted local changes exist)
+  #   pip install       — skips already-installed packages
+  #   alembic           — no-op if already at head
+  #   systemctl         — restart is always applied (picks up new code)
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to EC2
@@ -93,7 +95,8 @@ jobs:
 
             echo "=== Pulling latest code ==="
             export GIT_TERMINAL_PROMPT=0
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
 
             echo "=== Installing/updating dependencies ==="
             .venv/bin/pip install -r requirements.txt --quiet
