@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies import CurrentUser, get_current_user
+from app.dependencies import CurrentUser, get_current_user, require_role
 from app.models.registration import RegistrationRequest
 from app.schemas.registration import (
     RegistrationDecide,
@@ -17,7 +17,10 @@ router = APIRouter(prefix="/registration-requests", tags=["registration-requests
 
 
 @router.get("/", response_model=list[RegistrationRequestRead])
-def list_requests(db: Session = Depends(get_db)) -> list[RegistrationRequest]:
+def list_requests(
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(get_current_user),
+) -> list[RegistrationRequest]:
     return registration_service.get_all_requests(db)
 
 
@@ -27,8 +30,16 @@ def list_requests(db: Session = Depends(get_db)) -> list[RegistrationRequest]:
 def create_request(
     data: RegistrationRequestCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(
+        require_role("super_admin", "league_admin", "club_admin")
+    ),
 ) -> RegistrationRequest:
+    # Club admins can only create requests for their own club
+    if current_user.role == "club_admin" and data.club_id != current_user.club_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Club admins can only create registration requests for their own club.",
+        )
     req, error = registration_service.create_request(db, data, current_user)
     if error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, error)
@@ -40,7 +51,7 @@ def decide_request(
     request_id: int,
     data: RegistrationDecide,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_role("player")),
 ) -> RegistrationRequest:
     req = registration_service.get_request_by_id(db, request_id)
     if req is None:

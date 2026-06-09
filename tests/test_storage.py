@@ -355,7 +355,7 @@ def test_create_release_stores_s3_key_not_url(
     (file_url) AND the raw S3 key (s3_key).
     """
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=999, role="admin"
+        id=999, role="league_admin"
     )
 
     s3_key = "releases/documents/a1b2c3d4-test.pdf"

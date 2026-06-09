@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies import CurrentUser, get_current_user
+from app.dependencies import CurrentUser, get_current_user, require_role
 from app.models.release import PlayerRelease
 from app.schemas.club import UploadUrlResponse
 from app.schemas.release import ReleaseCreate, ReleaseDecide, ReleaseRead
@@ -14,7 +14,10 @@ router = APIRouter(prefix="/releases", tags=["releases"])
 
 
 @router.get("/", response_model=list[ReleaseRead])
-def list_releases(db: Session = Depends(get_db)) -> list[PlayerRelease]:
+def list_releases(
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(get_current_user),
+) -> list[PlayerRelease]:
     return release_service.get_all_releases(db)
 
 
@@ -57,8 +60,20 @@ def get_document_upload_url(
 def create_release(
     data: ReleaseCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(
+        require_role("super_admin", "league_admin", "club_admin")
+    ),
 ) -> PlayerRelease:
+    # Club admins can only initiate releases for players in their own club
+    if current_user.role == "club_admin":
+        from app.models.registration import PlayerSeasonRegistration  # noqa: PLC0415
+
+        reg = db.get(PlayerSeasonRegistration, data.registration_id)
+        if reg is not None and reg.club_id != current_user.club_id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Club admins can only initiate releases for their own club's players.",
+            )
     release, error = release_service.create_release(db, data, current_user)
     if error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, error)
@@ -70,7 +85,7 @@ def decide_release(
     release_id: int,
     data: ReleaseDecide,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_role("player")),
 ) -> PlayerRelease:
     release = release_service.get_release_by_id(db, release_id)
     if release is None:

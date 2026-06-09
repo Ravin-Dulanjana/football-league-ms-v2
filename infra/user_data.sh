@@ -6,6 +6,8 @@
 #   USE_RDS   "true"  → fetch DB password from Secrets Manager (RDS mode)
 #             "false" → install PostgreSQL on this server (EC2-local mode)
 #   APP_DIR, REPO_URL, DB_HOST, DB_PORT, DB_NAME, DB_USER, SECRET_ARN
+#   SQS_QUEUE_URL, COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID,
+#   COGNITO_REGION, COGNITO_JWKS_URL
 # =============================================================================
 set -euxo pipefail
 exec > >(tee /var/log/user-data.log | logger -t user-data) 2>&1
@@ -124,6 +126,10 @@ S3_BUCKET_NAME=${S3_BUCKET_NAME}
 CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
 # Phase 5 — SQS notification queue
 SQS_QUEUE_URL=${SQS_QUEUE_URL}
+COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+COGNITO_REGION=${COGNITO_REGION}
+COGNITO_JWKS_URL=${COGNITO_JWKS_URL}
 EOF
 chmod 600 "${APP_DIR}/.env"
 

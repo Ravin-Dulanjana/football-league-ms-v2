@@ -101,7 +101,7 @@ def _as_player(player: Player) -> None:
 
 def _as_admin() -> None:
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=999, role="admin"
+        id=999, role="league_admin"
     )
 
 
