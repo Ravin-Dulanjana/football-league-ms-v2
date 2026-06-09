@@ -122,6 +122,8 @@ SECRET_KEY=$(python3.11 -c "import secrets; print(secrets.token_hex(32))")
 # Phase 4 — S3 / CloudFront (values injected by CDK at EC2 boot time)
 S3_BUCKET_NAME=${S3_BUCKET_NAME}
 CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
+# Phase 5 — SQS notification queue
+SQS_QUEUE_URL=${SQS_QUEUE_URL}
 EOF
 chmod 600 "${APP_DIR}/.env"
 

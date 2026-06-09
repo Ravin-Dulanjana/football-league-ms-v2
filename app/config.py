@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     cloudfront_domain: str = ""
     aws_region: str = "ap-southeast-1"
 
+    # ------------------------------------------------------------------
+    # Phase 5 — SQS notification queue
+    # ------------------------------------------------------------------
+    # SQS notification queue — injected from CDK via .env on EC2.
+    # Left empty by default so local dev and tests skip SQS calls silently.
+    sqs_queue_url: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

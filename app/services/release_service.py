@@ -12,6 +12,7 @@ from app.models.registration import (
 )
 from app.models.release import PlayerRelease, ReleaseDocument, ReleaseStatus
 from app.schemas.release import ReleaseCreate
+from app.services.events import publish_event
 
 
 def get_all_releases(db: Session) -> list[PlayerRelease]:
@@ -66,6 +67,20 @@ def create_release(
     db.add(document)
     db.commit()  # single commit — release + document land together
     db.refresh(release)
+
+    # Notify club admin that a release has been initiated.
+    # release.player and release.from_club lazy-load via the still-open session.
+    # Note: Player has no email address in this schema — see self-audit for details.
+    publish_event(
+        "release.initiated",
+        {
+            "release_id": release.id,
+            "player_name": release.player.full_name,
+            "club_name": release.from_club.name,
+            "recipient_email": release.from_club.email,
+        },
+    )
+
     return release, None
 
 
@@ -105,4 +120,13 @@ def decide_release(
     registration.released_at = now  # type: ignore[union-attr]
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(release)
+    publish_event(
+        "release.confirmed",
+        {
+            "release_id": release.id,
+            "player_name": release.player.full_name,
+            "club_name": release.from_club.name,
+            "recipient_email": release.from_club.email,
+        },
+    )
     return release, None
