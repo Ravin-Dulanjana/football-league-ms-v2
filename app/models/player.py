@@ -21,7 +21,9 @@ class Player(Base):
     full_name: Mapped[str] = mapped_column(String(128))
     date_of_birth: Mapped[date] = mapped_column(Date)
     nic_number: Mapped[str] = mapped_column(String(24), unique=True, index=True)
-    photo_url: Mapped[str | None] = mapped_column(String(512))
+    # Stores the S3 object key (e.g. "players/photos/uuid.jpg"), not a URL.
+    # The CloudFront URL is built at read time by get_file_url() in storage.py.
+    photo_key: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[PlayerStatus] = mapped_column(
         Enum(
             PlayerStatus,

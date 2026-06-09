@@ -106,7 +106,9 @@ def _as_admin() -> None:
 
 
 _RELEASE_PAYLOAD = {
-    "file_url": "https://storage.example.com/release-letter.pdf",
+    # s3_key: the S3 object key returned by POST /releases/document-upload-url/
+    # In tests we use a hard-coded key — in production this comes from S3.
+    "s3_key": "releases/documents/test-uuid.pdf",
     "file_name": "release-letter.pdf",
 }
 
@@ -130,6 +132,8 @@ def test_create_release_success(
     assert body["status"] == "pending_player_confirmation"
     assert len(body["documents"]) == 1
     assert body["documents"][0]["file_name"] == "release-letter.pdf"
+    # s3_key is the raw key stored in the DB
+    assert body["documents"][0]["s3_key"] == "releases/documents/test-uuid.pdf"
 
 
 def test_create_release_registration_not_active(
@@ -203,7 +207,7 @@ def test_decide_confirm_marks_registration_released(
     db.add(
         ReleaseDocument(
             release_id=release.id,
-            file_url="https://storage.example.com/letter.pdf",
+            s3_key="releases/documents/test-letter.pdf",
             file_name="letter.pdf",
         )
     )
