@@ -64,8 +64,10 @@ class ReleaseDocument(Base):
     release_id: Mapped[int] = mapped_column(
         ForeignKey("player_releases.id", ondelete="CASCADE")
     )
-    # placeholder for S3 — will become a signed URL post-upload
-    file_url: Mapped[str] = mapped_column(String(512))
+    # S3 object key for this document (e.g. "releases/documents/uuid.pdf").
+    # The CloudFront URL is built at read time by get_file_url() in storage.py.
+    s3_key: Mapped[str] = mapped_column(String(512))
+    # Original filename for display (e.g. "release-letter.pdf").
     file_name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
+from app.config import settings
 from app.models.club import ClubStatus
 
 
@@ -13,11 +14,29 @@ class ClubRead(BaseModel):
     short_name: str | None
     code: str
     email: str | None
-    logo_url: str | None
+    # logo_key is the raw S3 object key stored in the database.
+    # logo_url is computed from it — not stored, built at serialisation time.
+    logo_key: str | None
     status: ClubStatus
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def logo_url(self) -> str | None:
+        """
+        Build the CloudFront URL from the stored S3 object key.
+
+        Returns None if no logo has been uploaded.
+        Returns the raw key if CLOUDFRONT_DOMAIN is not configured
+        (local development without AWS).
+        """
+        if not self.logo_key:
+            return None
+        if not settings.cloudfront_domain:
+            return self.logo_key  # local dev fallback
+        return f"https://{settings.cloudfront_domain}/{self.logo_key}"
 
 
 class ClubCreate(BaseModel):
@@ -25,7 +44,9 @@ class ClubCreate(BaseModel):
     short_name: str | None = None
     code: str
     email: str | None = None
-    logo_url: str | None = None
+    # logo_key is optional on creation — the logo upload is a separate step.
+    # Flow: create club → get upload URL → upload to S3 → PATCH with logo_key.
+    logo_key: str | None = None
 
 
 class ClubUpdate(BaseModel):
@@ -33,5 +54,26 @@ class ClubUpdate(BaseModel):
     short_name: str | None = None
     code: str | None = None
     email: str | None = None
-    logo_url: str | None = None
+    # Set this to the S3 key returned by the logo upload URL endpoint.
+    logo_key: str | None = None
     status: ClubStatus | None = None
+
+
+class UploadUrlResponse(BaseModel):
+    """
+    Returned by all *-upload-url endpoints.
+
+    url:      POST this URL directly to S3 (not to the API).
+    fields:   Include all of these as form fields in the multipart POST,
+              in the order they appear, BEFORE the file field.
+              boto3's presigned POST requires this ordering.
+    key:      The S3 object key that will be created on upload.
+              After a successful upload, send this key back to the API
+              (e.g. PATCH /clubs/{id}/ with {"logo_key": "<key>"}).
+    expires_in: Seconds until the upload URL expires (900 = 15 minutes).
+    """
+
+    url: str
+    fields: dict[str, str]
+    key: str
+    expires_in: int

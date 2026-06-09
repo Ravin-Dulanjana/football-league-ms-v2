@@ -21,7 +21,9 @@ class Club(Base):
     short_name: Mapped[str | None] = mapped_column(String(32))
     code: Mapped[str] = mapped_column(String(32), unique=True)
     email: Mapped[str | None] = mapped_column(String(255))
-    logo_url: Mapped[str | None] = mapped_column(String(512))
+    # Stores the S3 object key (e.g. "clubs/logos/uuid.jpg"), not a URL.
+    # The CloudFront URL is built at read time by get_file_url() in storage.py.
+    logo_key: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[ClubStatus] = mapped_column(
         Enum(
             ClubStatus,

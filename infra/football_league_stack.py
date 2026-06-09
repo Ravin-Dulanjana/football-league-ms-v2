@@ -12,6 +12,12 @@ Provisioned resources depend on the `use_rds` context flag (cdk.json):
     PostgreSQL is installed directly on the EC2 by user_data.sh.
     Architecture is identical from the app's perspective — just no RDS.
 
+Phase 4 additions (all modes):
+    S3 bucket — private, versioned, Block All Public Access
+    CloudFront distribution — OAC so CloudFront is the only entity that
+      can read from S3; clients never hit the bucket directly
+    IAM role S3 policy — scoped to this specific bucket (was resources=["*"])
+
 To switch modes:
   cdk.json  →  "use_rds": "true"    (requires a real AWS account with RDS access)
   cdk.json  →  "use_rds": "false"   (works on any account — PostgreSQL on EC2)
@@ -26,9 +32,12 @@ from aws_cdk import (
     RemovalPolicy,
     Stack,
 )
+from aws_cdk import aws_cloudfront as cloudfront
+from aws_cdk import aws_cloudfront_origins as origins
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_rds as rds
+from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 
@@ -96,11 +105,86 @@ class FootballLeagueStack(Stack):
         ec2_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "HTTPS")
 
         # ---------------------------------------------------------------
-        # 3. IAM Role for EC2
+        # 3. S3 Media Bucket — private, versioned, Block All Public Access
         #
-        # S3 access is always included (file uploads, Phase 3).
-        # Secrets Manager access is only added in RDS mode (fetching the
-        # auto-generated RDS password at boot).
+        # WHY PRIVATE:
+        #   Release documents are legal records. If the bucket is public,
+        #   anyone who guesses a key can download the file.
+        #   All public reads go through CloudFront (see section 4), which
+        #   authenticates to S3 via OAC — the bucket never serves directly.
+        #
+        # WHY VERSIONING:
+        #   Protects against accidental deletion. If a file is overwritten
+        #   or deleted, previous versions are recoverable.
+        #   ⚠️  Add a lifecycle rule in production to expire non-current
+        #   versions after 30 days — otherwise storage costs grow forever.
+        #
+        # enforce_ssl=True:
+        #   Denies any request that is not made over HTTPS (adds a bucket
+        #   policy condition: aws:SecureTransport = true).
+        # ---------------------------------------------------------------
+        media_bucket = s3.Bucket(
+            self,
+            "MediaBucket",
+            versioned=True,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            removal_policy=RemovalPolicy.RETAIN,
+            enforce_ssl=True,
+            cors=[
+                s3.CorsRule(
+                    # CORS is required for browser-based pre-signed POST uploads.
+                    # The browser makes a cross-origin POST to s3.amazonaws.com;
+                    # without CORS, the browser blocks the response.
+                    # Restrict allowed_origins to your domain before production.
+                    allowed_headers=["*"],
+                    allowed_methods=[s3.HttpMethods.POST, s3.HttpMethods.PUT],
+                    allowed_origins=["*"],
+                    max_age=3000,
+                )
+            ],
+        )
+
+        # ---------------------------------------------------------------
+        # 4. CloudFront Distribution with OAC
+        #
+        # OAC (Origin Access Control) — the modern replacement for OAI.
+        # S3BucketOrigin.with_origin_access_control() (CDK ≥ 2.177):
+        #   - Creates an OAC resource automatically
+        #   - Grants CloudFront distribution a signed SigV4 identity
+        #   - Adds a bucket policy: allow s3:GetObject only from this
+        #     specific CloudFront distribution (pinned by distribution ARN)
+        #
+        # WHY OAC instead of making the bucket public:
+        #   A public bucket is reachable directly at
+        #   bucket.s3.amazonaws.com — any link sharer can expose files.
+        #   With OAC, requests to s3.amazonaws.com return 403; only
+        #   requests routed through CloudFront succeed.
+        #
+        # CACHING_OPTIMIZED cache policy:
+        #   Caches GET/HEAD responses, respects Cache-Control headers.
+        #   Serves subsequent reads from the nearest edge location,
+        #   reducing S3 GET costs and improving global latency.
+        # ---------------------------------------------------------------
+        distribution = cloudfront.Distribution(
+            self,
+            "CDN",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin.with_origin_access_control(media_bucket),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+            ),
+            comment="Football League media CDN",
+        )
+
+        # ---------------------------------------------------------------
+        # 5. IAM Role for EC2
+        #
+        # S3 policy is now SCOPED to the media bucket (was resources=["*"]).
+        # Principle of least privilege: the EC2 can only operate on objects
+        # inside the football-league media bucket.
+        #
+        # Secrets Manager access is only added in RDS mode.
         # ---------------------------------------------------------------
         instance_role = iam.Role(
             self,
@@ -115,19 +199,28 @@ class FootballLeagueStack(Stack):
         )
         instance_role.add_to_policy(
             iam.PolicyStatement(
-                sid="S3Access",
+                sid="S3MediaBucketAccess",
                 actions=[
                     "s3:GetObject",
                     "s3:PutObject",
                     "s3:DeleteObject",
-                    "s3:ListBucket",
                 ],
-                resources=["*"],  # Tighten to bucket ARN before production
+                # Scope to objects inside the bucket only.
+                # media_bucket.bucket_arn             = arn:aws:s3:::bucket-name
+                # media_bucket.bucket_arn + "/*"      = arn:aws:s3:::bucket-name/*
+                resources=[f"{media_bucket.bucket_arn}/*"],
+            )
+        )
+        instance_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="S3MediaBucketList",
+                actions=["s3:ListBucket"],
+                resources=[media_bucket.bucket_arn],
             )
         )
 
         # ---------------------------------------------------------------
-        # 4. Database — RDS or EC2-local PostgreSQL
+        # 6. Database — RDS or EC2-local PostgreSQL
         # ---------------------------------------------------------------
         db_host: str
         db_port: str
@@ -137,12 +230,6 @@ class FootballLeagueStack(Stack):
         if use_rds:
             # -----------------------------------------------------------
             # RDS mode: managed PostgreSQL in a private subnet.
-            #
-            # Security group: port 5432 only from the EC2 SG, not any IP.
-            # Credentials: auto-generated by CDK, stored in Secrets Manager.
-            #   EC2 fetches the password at boot via the IAM role — the
-            #   password never appears in code or on disk.
-            # publicly_accessible=False: RDS has no public DNS name.
             # -----------------------------------------------------------
             rds_sg = ec2.SecurityGroup(
                 self,
@@ -179,8 +266,8 @@ class FootballLeagueStack(Stack):
                 multi_az=False,
                 allocated_storage=20,
                 publicly_accessible=False,
-                deletion_protection=False,  # Set True before production
-                removal_policy=RemovalPolicy.DESTROY,  # Set RETAIN before production
+                deletion_protection=False,
+                removal_policy=RemovalPolicy.DESTROY,
             )
 
             if db_instance.secret:
@@ -192,31 +279,17 @@ class FootballLeagueStack(Stack):
             secret_arn = db_instance.secret.secret_arn if db_instance.secret else ""
 
         else:
-            # -----------------------------------------------------------
-            # EC2-local mode: PostgreSQL installs on the same EC2 instance.
-            #
-            # user_data.sh detects USE_RDS=false and:
-            #   1. Installs PostgreSQL 15 from the official PGDG repo
-            #   2. Initialises the cluster and configures password auth
-            #   3. Creates the football_league database and user
-            #   4. Generates a random password stored only in .env
-            #
-            # Architecture is identical from the app's perspective —
-            # DATABASE_URL just points to localhost instead of an RDS hostname.
-            # To migrate to RDS later: set use_rds=true in cdk.json,
-            # pg_dump from EC2, pg_restore to RDS, redeploy.
-            # -----------------------------------------------------------
             db_host = "localhost"
             db_port = "5432"
             db_user = "postgres"
             secret_arn = ""
 
         # ---------------------------------------------------------------
-        # 5. EC2 User Data
+        # 7. EC2 User Data
         #
-        # Variables injected here are shell exports that user_data.sh reads.
-        # CDK token resolution: when use_rds=true, db_host is a CloudFormation
-        # GetAtt reference that resolves to the RDS hostname at deploy time.
+        # S3_BUCKET_NAME and CLOUDFRONT_DOMAIN are injected into .env
+        # by user_data.sh so the app can generate presigned URLs and
+        # build CloudFront URLs without any hardcoded values in code.
         # ---------------------------------------------------------------
         user_data = ec2.UserData.for_linux()
         user_data.add_commands(
@@ -229,6 +302,9 @@ class FootballLeagueStack(Stack):
             'export DB_NAME="football_league"',
             f'export DB_USER="{db_user}"',
             f'export SECRET_ARN="{secret_arn}"',
+            # Phase 4 — S3 / CloudFront
+            f'export S3_BUCKET_NAME="{media_bucket.bucket_name}"',
+            f'export CLOUDFRONT_DOMAIN="{distribution.distribution_domain_name}"',
         )
 
         script_path = os.path.join(os.path.dirname(__file__), "user_data.sh")
@@ -236,7 +312,7 @@ class FootballLeagueStack(Stack):
             user_data.add_commands(*f.read().split("\n"))
 
         # ---------------------------------------------------------------
-        # 6. EC2 Instance
+        # 8. EC2 Instance
         # ---------------------------------------------------------------
         key_pair_name: str = self.node.try_get_context("key_pair_name") or ""
         key_pair = (
@@ -248,8 +324,6 @@ class FootballLeagueStack(Stack):
         instance = ec2.Instance(
             self,
             "EC2",
-            # t3.micro is the free-tier eligible instance in ap-southeast-1.
-            # t2.micro is not available on restricted free-plan accounts.
             instance_type=ec2.InstanceType.of(
                 ec2.InstanceClass.T3, ec2.InstanceSize.MICRO
             ),
@@ -262,12 +336,11 @@ class FootballLeagueStack(Stack):
             key_pair=key_pair,
         )
 
-        # In RDS mode, wait for the database before EC2 boots
         if use_rds:
             instance.node.add_dependency(db_instance)  # type: ignore[possibly-undefined]
 
         # ---------------------------------------------------------------
-        # 7. Stack Outputs
+        # 9. Stack Outputs
         # ---------------------------------------------------------------
         CfnOutput(
             self,
@@ -287,6 +360,30 @@ class FootballLeagueStack(Stack):
             value="rds" if use_rds else "ec2-local",
             description="Database mode: rds=managed RDS, ec2-local=PostgreSQL on EC2",
         )
+        CfnOutput(
+            self,
+            "MediaBucketName",
+            value=media_bucket.bucket_name,
+            description="S3 bucket for media files (logos, photos, documents)",
+        )
+        CfnOutput(
+            self,
+            "CloudFrontDomain",
+            value=distribution.distribution_domain_name,
+            description="CloudFront domain for serving media files",
+        )
+        CfnOutput(
+            self,
+            "CloudFrontDistributionId",
+            value=distribution.distribution_id,
+            description="CloudFront distribution ID",
+        )
+        CfnOutput(
+            self,
+            "SSMConnectCommand",
+            value=f"aws ssm start-session --target {instance.instance_id}",
+            description="Connect via SSM Session Manager (no SSH key required)",
+        )
         if use_rds:
             CfnOutput(
                 self,
@@ -304,9 +401,3 @@ class FootballLeagueStack(Stack):
                 ),
                 description="Secrets Manager ARN for RDS credentials",
             )
-        CfnOutput(
-            self,
-            "SSMConnectCommand",
-            value=f"aws ssm start-session --target {instance.instance_id}",
-            description="Connect via SSM Session Manager (no SSH key required)",
-        )

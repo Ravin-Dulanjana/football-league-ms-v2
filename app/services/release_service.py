@@ -60,7 +60,7 @@ def create_release(
 
     document = ReleaseDocument(
         release_id=release.id,
-        file_url=data.file_url,
+        s3_key=data.s3_key,
         file_name=data.file_name,
     )
     db.add(document)
