@@ -1,0 +1,20 @@
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/opt/football-league/app.log",
+            "log_group_name": "/football-league/api",
+            "log_stream_name": "{instance_id}/app.log",
+            "timestamp_format": "%Y-%m-%dT%H:%M:%SZ",
+            "timezone": "UTC",
+            "encoding": "utf-8",
+            "multi_line_start_pattern": "^\\{"
+          }
+        ]
+      }
+    },
+    "log_stream_name": "{instance_id}/default"
+  }
+}

@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     # Stored explicitly so it can be overridden in tests without a real pool.
     cognito_jwks_url: str = ""
 
+    # ------------------------------------------------------------------
+    # Phase 7 — CloudWatch observability
+    #
+    # CLOUDWATCH_NAMESPACE: custom metric namespace for PutMetricData.
+    #   Set to "FootballLeague" on EC2 (injected by CDK).
+    #   Left empty by default — middleware skips PutMetricData when unset,
+    #   keeping local dev and tests clean without mocking boto3.
+    # ------------------------------------------------------------------
+    cloudwatch_namespace: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

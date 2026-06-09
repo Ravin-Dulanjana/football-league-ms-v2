@@ -16,7 +16,7 @@ exec > >(tee /var/log/user-data.log | logger -t user-data) 2>&1
 # 1. System packages
 # =============================================================================
 dnf update -y
-dnf install -y python3.11 python3.11-pip git nginx
+dnf install -y python3.11 python3.11-pip git nginx amazon-cloudwatch-agent
 
 # Make python3.11 the default python3
 alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
@@ -130,6 +130,8 @@ COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
 COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
 COGNITO_REGION=${COGNITO_REGION}
 COGNITO_JWKS_URL=${COGNITO_JWKS_URL}
+# Phase 7 — CloudWatch observability
+CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
 EOF
 chmod 600 "${APP_DIR}/.env"
 
@@ -166,8 +168,10 @@ done
 chown -R ec2-user:ec2-user "${APP_DIR}"
 
 # Create log files owned by ec2-user so gunicorn can write them at start-up.
-touch /var/log/gunicorn-access.log /var/log/gunicorn-error.log
-chown ec2-user:ec2-user /var/log/gunicorn-access.log /var/log/gunicorn-error.log
+# app.log receives the application's structured JSON logs (shipped by the
+# CloudWatch agent). gunicorn-access.log receives gunicorn's HTTP access log.
+touch /var/log/gunicorn-access.log "${APP_DIR}/app.log"
+chown ec2-user:ec2-user /var/log/gunicorn-access.log "${APP_DIR}/app.log"
 
 cat > /etc/systemd/system/gunicorn.service << 'UNIT'
 [Unit]
@@ -183,8 +187,11 @@ ExecStart=/opt/football-league/.venv/bin/gunicorn main:app \
     --workers 4 \
     --worker-class uvicorn.workers.UvicornWorker \
     --bind 127.0.0.1:8000 \
-    --access-logfile /var/log/gunicorn-access.log \
-    --error-logfile /var/log/gunicorn-error.log
+    --access-logfile /var/log/gunicorn-access.log
+# Redirect both stdout (our structured JSON) and stderr (gunicorn internals)
+# to app.log so the CloudWatch agent ships all application output.
+StandardOutput=append:/opt/football-league/app.log
+StandardError=append:/opt/football-league/app.log
 Restart=always
 RestartSec=5
 
@@ -224,6 +231,41 @@ NGINX
 rm -f /etc/nginx/conf.d/default.conf
 systemctl enable nginx
 systemctl restart nginx
+
+# =============================================================================
+# 9. CloudWatch agent — ship structured JSON logs to CloudWatch Logs
+#
+# WHY NOT JUST USE print() / CLOUDWATCH EMBEDDED METRICS:
+#   We want per-request structured logs in the CloudFront Logs Insights
+#   console alongside metrics. The agent bridges the two: it tails app.log
+#   and uploads each JSON line as a CloudWatch log event.  Our middleware
+#   calls PutMetricData directly for the metrics side.
+#
+# HOW IT WORKS:
+#   1. The agent reads the config file we just wrote.
+#   2. It opens app.log and sends new lines to /football-league/api.
+#   3. The log stream is named after the EC2 instance ID so you can tell
+#      which instance wrote each log when running multiple servers.
+#
+# The EC2 IAM role is granted logs:PutLogEvents, logs:CreateLogStream,
+# logs:DescribeLogStreams, and cloudwatch:PutMetricData by the CDK stack.
+# =============================================================================
+CW_AGENT_CONFIG_DIR="/opt/aws/amazon-cloudwatch-agent/etc"
+mkdir -p "${CW_AGENT_CONFIG_DIR}"
+cp "${APP_DIR}/infra/cloudwatch_agent_config.json" \
+    "${CW_AGENT_CONFIG_DIR}/amazon-cloudwatch-agent.json"
+
+# Start the agent using the config file.
+# -m ec2 tells it to use the EC2 IAM role for credentials (no key files needed).
+# -s starts the agent process immediately.
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+    -a fetch-config \
+    -m ec2 \
+    -s \
+    -c "file:${CW_AGENT_CONFIG_DIR}/amazon-cloudwatch-agent.json"
+
+systemctl enable amazon-cloudwatch-agent
+systemctl start amazon-cloudwatch-agent
 
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
 echo "====== Setup complete. Test: curl http://${PUBLIC_IP}/clubs/ ======"
