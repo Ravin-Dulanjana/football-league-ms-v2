@@ -35,6 +35,7 @@ from aws_cdk import (
 )
 from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
@@ -343,7 +344,90 @@ class FootballLeagueStack(Stack):
         )
 
         # ---------------------------------------------------------------
-        # 7. Database — RDS or EC2-local PostgreSQL
+        # 7. Cognito — User Pool + Client
+        #
+        # User Pool:  the user directory. Email-only sign-in. Self sign-up
+        #   is disabled — admins create users via the AWS console or CLI so
+        #   they can set the custom:role attribute before the user logs in.
+        #
+        # Password policy: min 8 chars, require uppercase + lowercase +
+        #   number + symbol. Cognito enforces this on all SetPassword calls.
+        #
+        # Custom attributes:
+        #   custom:role      — "super_admin" | "league_admin" | "club_admin" | "player"
+        #   custom:club_id   — numeric string (NumberAttribute stored as string in JWT)
+        #   custom:player_id — numeric string
+        #   All are mutable so admins can reassign roles without recreating users.
+        #
+        # ⚠️  Security: custom attributes are set by admins only. Users
+        #   cannot modify them — the User Pool Client has no write access to
+        #   custom attributes, only read.
+        #
+        # User Pool Client:
+        #   - No client secret: we're calling Cognito from EC2 server-side
+        #     code, but without a client secret means no SECRET_HASH needed.
+        #     A secret would be correct for a truly confidential client —
+        #     acceptable trade-off here for simplicity.
+        #   - USER_PASSWORD_AUTH: allows email+password login (InitiateAuth).
+        #   - Token validity: access=1h, id=1h, refresh=30d (Cognito defaults).
+        # ---------------------------------------------------------------
+        user_pool = cognito.UserPool(
+            self,
+            "UserPool",
+            user_pool_name="football-league-users",
+            # Admins create users; players/admins do not self-register
+            self_sign_up_enabled=False,
+            sign_in_aliases=cognito.SignInAliases(email=True, username=False),
+            auto_verify=cognito.AutoVerifiedAttrs(email=True),
+            password_policy=cognito.PasswordPolicy(
+                min_length=8,
+                require_uppercase=True,
+                require_lowercase=True,
+                require_digits=True,
+                require_symbols=True,
+            ),
+            # Standard attributes
+            standard_attributes=cognito.StandardAttributes(
+                email=cognito.StandardAttribute(required=True, mutable=True),
+            ),
+            # Custom attributes — mutable so admins can reassign roles
+            custom_attributes={
+                "role": cognito.StringAttribute(mutable=True),
+                "club_id": cognito.NumberAttribute(mutable=True),
+                "player_id": cognito.NumberAttribute(mutable=True),
+            },
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        user_pool_client = user_pool.add_client(
+            "AppClient",
+            user_pool_client_name="football-league-app",
+            # No client secret — simpler server-side flow; see note above
+            generate_secret=False,
+            auth_flows=cognito.AuthFlow(
+                # USER_PASSWORD_AUTH: email+password → tokens (our /auth/login)
+                user_password=True,
+                # REFRESH_TOKEN_AUTH is implicitly enabled when user_password=True
+            ),
+            # Token validity — 1h access/id, 30d refresh
+            access_token_validity=Duration.hours(1),
+            id_token_validity=Duration.hours(1),
+            refresh_token_validity=Duration.days(30),
+            # Prevent client from writing custom attributes (read-only for client)
+            read_attributes=cognito.ClientAttributes().with_standard_attributes(
+                cognito.StandardAttributesMask(email=True)
+            ),
+        )
+
+        # JWKS URL — FastAPI uses this to fetch RSA public keys for JWT verification.
+        # Format: https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json
+        jwks_url = (
+            f"https://cognito-idp.{self.region}.amazonaws.com"
+            f"/{user_pool.user_pool_id}/.well-known/jwks.json"
+        )
+
+        # ---------------------------------------------------------------
+        # 8. Database — RDS or EC2-local PostgreSQL
         # ---------------------------------------------------------------
         db_host: str
         db_port: str
@@ -430,6 +514,10 @@ class FootballLeagueStack(Stack):
             f'export CLOUDFRONT_DOMAIN="{distribution.distribution_domain_name}"',
             # Phase 5 — SQS notification queue
             f'export SQS_QUEUE_URL="{notification_queue.queue_url}"',
+            f'export COGNITO_USER_POOL_ID="{user_pool.user_pool_id}"',
+            f'export COGNITO_CLIENT_ID="{user_pool_client.user_pool_client_id}"',
+            f'export COGNITO_REGION="{self.region}"',
+            f'export COGNITO_JWKS_URL="{jwks_url}"',
         )
 
         script_path = os.path.join(os.path.dirname(__file__), "user_data.sh")
@@ -543,4 +631,22 @@ class FootballLeagueStack(Stack):
             "NotificationLambdaName",
             value=notification_fn.function_name,
             description="Lambda function name for the notification handler",
+        )
+        CfnOutput(
+            self,
+            "CognitoUserPoolId",
+            value=user_pool.user_pool_id,
+            description="Cognito User Pool ID — set as COGNITO_USER_POOL_ID in .env",
+        )
+        CfnOutput(
+            self,
+            "CognitoClientId",
+            value=user_pool_client.user_pool_client_id,
+            description="Cognito App Client ID — set as COGNITO_CLIENT_ID in .env",
+        )
+        CfnOutput(
+            self,
+            "CognitoJwksUrl",
+            value=jwks_url,
+            description="JWKS URL for JWT verification — set as COGNITO_JWKS_URL in .env",  # noqa: E501
         )

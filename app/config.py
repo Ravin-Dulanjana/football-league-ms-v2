@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # Left empty by default so local dev and tests skip SQS calls silently.
     sqs_queue_url: str = ""
 
+    # Cognito — injected from CDK via .env on EC2.
+    # Left empty by default; get_current_user raises 401 when not configured
+    # (preventing unauthenticated access to all protected endpoints).
+    cognito_user_pool_id: str = ""
+    cognito_client_id: str = ""
+    cognito_region: str = "ap-southeast-1"
+    # Derived from pool ID: https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json
+    # Stored explicitly so it can be overridden in tests without a real pool.
+    cognito_jwks_url: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies import CurrentUser, get_current_user, require_role
 from app.models.club import Club
 from app.schemas.club import ClubCreate, ClubRead, ClubUpdate, UploadUrlResponse
 from app.services import club_service, storage
@@ -15,12 +16,19 @@ _DUPLICATE_MSG = "A club with that name or code already exists."
 
 
 @router.get("/", response_model=list[ClubRead])
-def list_clubs(db: Session = Depends(get_db)) -> list[Club]:
+def list_clubs(
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(get_current_user),  # any authenticated user
+) -> list[Club]:
     return club_service.get_all_clubs(db)
 
 
 @router.post("/", response_model=ClubRead, status_code=status.HTTP_201_CREATED)
-def create_club(data: ClubCreate, db: Session = Depends(get_db)) -> Club:
+def create_club(
+    data: ClubCreate,
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_role("super_admin", "league_admin")),
+) -> Club:
     try:
         return club_service.create_club(db, data)
     except IntegrityError as err:
@@ -28,7 +36,11 @@ def create_club(data: ClubCreate, db: Session = Depends(get_db)) -> Club:
 
 
 @router.get("/{club_id}/", response_model=ClubRead)
-def get_club(club_id: int, db: Session = Depends(get_db)) -> Club:
+def get_club(
+    club_id: int,
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(get_current_user),
+) -> Club:
     club = club_service.get_club_by_id(db, club_id)
     if club is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found.")
@@ -36,10 +48,22 @@ def get_club(club_id: int, db: Session = Depends(get_db)) -> Club:
 
 
 @router.patch("/{club_id}/", response_model=ClubRead)
-def update_club(club_id: int, data: ClubUpdate, db: Session = Depends(get_db)) -> Club:
+def update_club(
+    club_id: int,
+    data: ClubUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(
+        require_role("super_admin", "league_admin", "club_admin")
+    ),
+) -> Club:
     club = club_service.get_club_by_id(db, club_id)
     if club is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found.")
+    # Club admins may only update their own club
+    if current_user.role == "club_admin" and current_user.club_id != club_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Club admins can only update their own club."
+        )
     try:
         return club_service.update_club(db, club, data)
     except IntegrityError as err:
