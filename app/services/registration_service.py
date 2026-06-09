@@ -14,6 +14,7 @@ from app.models.registration import (
     RegistrationType,
 )
 from app.schemas.registration import RegistrationRequestCreate
+from app.services.events import publish_event
 
 
 def get_all_requests(db: Session) -> list[RegistrationRequest]:
@@ -66,6 +67,24 @@ def create_request(
     db.add(req)
     db.commit()
     db.refresh(req)
+
+    # Notify club admin that a player wants to join.
+    # req.club, req.player, req.season are lazy-loaded here via the still-open
+    # session. Fire-and-forget: a SQS outage will not fail the request itself.
+    publish_event(
+        "registration.requested",
+        {
+            "registration_request_id": req.id,
+            "player_id": req.player_id,
+            "player_name": req.player.full_name,
+            "club_id": req.club_id,
+            "club_name": req.club.name,
+            "season_id": req.season_id,
+            "season_name": req.season.name,
+            "recipient_email": req.club.email,
+        },
+    )
+
     return req, None
 
 
@@ -95,6 +114,16 @@ def decide_request(
         req.responded_at = now
         db.commit()
         db.refresh(req)
+        publish_event(
+            "registration.rejected",
+            {
+                "registration_request_id": req.id,
+                "player_name": req.player.full_name,
+                "club_name": req.club.name,
+                "season_name": req.season.name,
+                "recipient_email": req.club.email,
+            },
+        )
         return req, None
 
     # accept — create registration atomically
@@ -110,4 +139,14 @@ def decide_request(
     db.add(registration)
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(req)
+    publish_event(
+        "registration.accepted",
+        {
+            "registration_request_id": req.id,
+            "player_name": req.player.full_name,
+            "club_name": req.club.name,
+            "season_name": req.season.name,
+            "recipient_email": req.club.email,
+        },
+    )
     return req, None

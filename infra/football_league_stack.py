@@ -29,6 +29,7 @@ import os
 
 from aws_cdk import (
     CfnOutput,
+    Duration,
     RemovalPolicy,
     Stack,
 )
@@ -36,8 +37,12 @@ from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_lambda_event_sources as event_sources
 from aws_cdk import aws_rds as rds
 from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_ses as ses
+from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
 
@@ -220,7 +225,125 @@ class FootballLeagueStack(Stack):
         )
 
         # ---------------------------------------------------------------
-        # 6. Database — RDS or EC2-local PostgreSQL
+        # 4. SQS — notification queue + dead letter queue
+        #
+        # Standard queue (not FIFO): notification ordering doesn't matter
+        # and standard gives us higher throughput at lower cost.
+        #
+        # visibility_timeout: must be >= Lambda timeout (60s). Using 6×
+        # the Lambda timeout (360s) is the AWS recommendation — gives the
+        # Lambda plenty of time to process and delete the message before
+        # SQS re-delivers it to another invocation.
+        #
+        # dead_letter_queue: after 3 failed deliveries, the message is
+        # moved to the DLQ automatically. Messages wait there for 14 days
+        # for inspection and manual re-processing.
+        # ---------------------------------------------------------------
+        notification_dlq = sqs.Queue(
+            self,
+            "NotificationDLQ",
+            queue_name="football-league-notifications-dlq",
+            retention_period=Duration.days(14),
+        )
+
+        notification_queue = sqs.Queue(
+            self,
+            "NotificationQueue",
+            queue_name="football-league-notifications",
+            # 6 × Lambda timeout — prevents duplicate delivery while Lambda processes
+            visibility_timeout=Duration.seconds(360),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=3,
+                queue=notification_dlq,
+            ),
+        )
+
+        # EC2 role may send messages to the queue (publish_event in events.py)
+        notification_queue.grant_send_messages(instance_role)
+
+        # ---------------------------------------------------------------
+        # 5. Lambda — notification handler
+        #
+        # Packaged from infra/lambda/ — CDK zips the directory and uploads
+        # it to an S3 staging bucket during `cdk deploy`.
+        #
+        # Handler: notification_handler.handler (module.function)
+        # Runtime: Python 3.11 — matches the app's runtime
+        # Timeout: 60s — accommodates SES API latency plus retries
+        #
+        # IAM: CDK auto-creates a Lambda execution role. We attach:
+        #   - SQS consume permissions (via grant_consume_messages)
+        #   - ses:SendEmail (SES does not support resource-level restrictions
+        #     on SendEmail — resource must be "*")
+        # ---------------------------------------------------------------
+        ses_sender_email: str = (
+            self.node.try_get_context("ses_sender_email") or "noreply@example.com"
+        )
+
+        notification_fn = lambda_.Function(
+            self,
+            "NotificationHandler",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="notification_handler.handler",
+            code=lambda_.Code.from_asset(
+                os.path.join(os.path.dirname(__file__), "lambda")
+            ),
+            environment={
+                "SES_SENDER_EMAIL": ses_sender_email,
+                "SES_REGION": self.region,
+            },
+            timeout=Duration.seconds(60),
+            description="Sends email notifications for domain events via SES",
+        )
+
+        # Grant Lambda permission to consume messages from the queue.
+        # This adds: ReceiveMessage, DeleteMessage, GetQueueAttributes,
+        # ChangeMessageVisibility — everything the SQS poller needs.
+        notification_queue.grant_consume_messages(notification_fn)
+
+        # SES SendEmail — not resource-scoped (SES limitation)
+        notification_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                sid="SESsendEmail",
+                actions=["ses:SendEmail"],
+                resources=["*"],
+            )
+        )
+
+        # SQS → Lambda event source mapping.
+        # batch_size=10: Lambda receives up to 10 messages per invocation.
+        # report_batch_item_failures=True: Lambda returns failed message IDs
+        # so SQS retries only those — not the whole batch. This prevents
+        # duplicate emails for messages that already succeeded.
+        notification_fn.add_event_source(
+            event_sources.SqsEventSource(
+                notification_queue,
+                batch_size=10,
+                report_batch_item_failures=True,
+            )
+        )
+
+        # ---------------------------------------------------------------
+        # 6. SES — email identity
+        #
+        # Verifies the sender address. AWS sends a verification email to
+        # ses_sender_email when this stack is deployed for the first time.
+        # The address must be clicked before SES will send from it.
+        #
+        # ⚠️  SES sandbox mode (default): you can only send TO verified
+        #     email addresses as well. Request SES production access in the
+        #     AWS console to send to arbitrary recipients.
+        #
+        # Update ses_sender_email in cdk.json before deploying.
+        # ---------------------------------------------------------------
+        ses.EmailIdentity(
+            self,
+            "SenderEmailIdentity",
+            identity=ses.Identity.email(ses_sender_email),
+        )
+
+        # ---------------------------------------------------------------
+        # 7. Database — RDS or EC2-local PostgreSQL
         # ---------------------------------------------------------------
         db_host: str
         db_port: str
@@ -305,6 +428,8 @@ class FootballLeagueStack(Stack):
             # Phase 4 — S3 / CloudFront
             f'export S3_BUCKET_NAME="{media_bucket.bucket_name}"',
             f'export CLOUDFRONT_DOMAIN="{distribution.distribution_domain_name}"',
+            # Phase 5 — SQS notification queue
+            f'export SQS_QUEUE_URL="{notification_queue.queue_url}"',
         )
 
         script_path = os.path.join(os.path.dirname(__file__), "user_data.sh")
@@ -401,3 +526,21 @@ class FootballLeagueStack(Stack):
                 ),
                 description="Secrets Manager ARN for RDS credentials",
             )
+        CfnOutput(
+            self,
+            "NotificationQueueURL",
+            value=notification_queue.queue_url,
+            description="SQS queue URL — set as SQS_QUEUE_URL in EC2 .env",
+        )
+        CfnOutput(
+            self,
+            "NotificationDLQURL",
+            value=notification_dlq.queue_url,
+            description="Dead letter queue — inspect here if notifications fail",
+        )
+        CfnOutput(
+            self,
+            "NotificationLambdaName",
+            value=notification_fn.function_name,
+            description="Lambda function name for the notification handler",
+        )

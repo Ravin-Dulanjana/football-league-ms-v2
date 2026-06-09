@@ -9,6 +9,7 @@
     "@aws-cdk/aws-iam:minimizePolicies": true,
     "@aws-cdk/aws-rds:databaseProxyUniqueResourceName": true,
     "key_pair_name": "football-league-key",
-    "use_rds": "false"
+    "use_rds": "false",
+    "ses_sender_email": "notifications@football-league.example"
   }
 }
