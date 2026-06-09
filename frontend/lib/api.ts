@@ -15,6 +15,7 @@
 
 import type {
   AccountActionRequest,
+  AnalyticsSummary,
   AuditLogRead,
   ClubCreate,
   ClubRead,
@@ -378,5 +379,5 @@ export const reportsApi = {
     if (seasonId) q.set("season_id", String(seasonId));
     return `/api/proxy?path=${encodeURIComponent(`/reports/export/?${q}`)}`;
   },
-  analytics: () => apiFetch<import("@/types").AnalyticsSummary>("/analytics/summary/"),
+  analytics: () => apiFetch<AnalyticsSummary>("/analytics/summary/"),
 };
