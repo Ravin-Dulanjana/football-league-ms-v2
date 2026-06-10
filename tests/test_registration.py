@@ -197,9 +197,10 @@ def test_decide_accept_creates_active_registration(
     assert psr.club_id == club.id
 
 
-def test_decide_reject_does_not_create_registration(
+def test_decide_reject_is_no_longer_valid(
     client: TestClient, db: Session, club: Club, player: Player, open_season: Season
 ) -> None:
+    """Players can only acknowledge (accept); 'reject' is no longer a valid decision."""
     req = RegistrationRequest(
         season_id=open_season.id,
         club_id=club.id,
@@ -214,9 +215,9 @@ def test_decide_reject_does_not_create_registration(
     response = client.post(
         f"/registration-requests/{req.id}/decide/", json={"decision": "reject"}
     )
-    assert response.status_code == 200
-    assert response.json()["status"] == "rejected"
+    assert response.status_code == 422  # schema no longer accepts "reject"
 
+    # No registration must have been created
     db.expire_all()
     results = (
         db.execute(

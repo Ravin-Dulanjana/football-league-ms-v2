@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser, get_current_user
 from app.models.club import Club, ClubStatus
+from app.models.club_season import ClubSeasonProfile, ClubSeasonProfileStatus
 from app.models.player import Player
 from app.models.registration import (
     PlayerSeasonRegistration,
@@ -99,9 +100,23 @@ def _as_player(player: Player) -> None:
     )
 
 
-def _as_admin() -> None:
+@pytest.fixture()
+def submitted_profile(db: Session, club: Club, season: Season) -> ClubSeasonProfile:
+    """ClubSeasonProfile in SUBMITTED state; required before creating a release."""
+    profile = ClubSeasonProfile(
+        club_id=club.id,
+        season_id=season.id,
+        status=ClubSeasonProfileStatus.SUBMITTED,
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def _as_club_admin(club: Club) -> None:
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=999, role="league_admin"
+        id=999, role="club_admin", club_id=club.id
     )
 
 
@@ -122,8 +137,10 @@ def test_create_release_success(
     client: TestClient,
     db: Session,
     active_registration: PlayerSeasonRegistration,
+    submitted_profile: ClubSeasonProfile,
+    club: Club,
 ) -> None:
-    _as_admin()
+    _as_club_admin(club)
     payload = {**_RELEASE_PAYLOAD, "registration_id": active_registration.id}
     response = client.post("/releases/", json=payload)
     assert response.status_code == 201
@@ -153,7 +170,7 @@ def test_create_release_registration_not_active(
     db.add(released_reg)
     db.commit()
 
-    _as_admin()
+    _as_club_admin(club)
     payload = {**_RELEASE_PAYLOAD, "registration_id": released_reg.id}
     response = client.post("/releases/", json=payload)
     assert response.status_code == 400
@@ -164,6 +181,7 @@ def test_create_release_duplicate_rejected(
     client: TestClient,
     db: Session,
     active_registration: PlayerSeasonRegistration,
+    submitted_profile: ClubSeasonProfile,
     player: Player,
     club: Club,
 ) -> None:
@@ -177,7 +195,7 @@ def test_create_release_duplicate_rejected(
     db.add(existing_release)
     db.commit()
 
-    _as_admin()
+    _as_club_admin(club)
     payload = {**_RELEASE_PAYLOAD, "registration_id": active_registration.id}
     response = client.post("/releases/", json=payload)
     assert response.status_code == 400
@@ -227,13 +245,14 @@ def test_decide_confirm_marks_registration_released(
     assert active_registration.released_at is not None
 
 
-def test_decide_reject_does_not_change_registration(
+def test_decide_reject_is_no_longer_valid(
     client: TestClient,
     db: Session,
     active_registration: PlayerSeasonRegistration,
     player: Player,
     club: Club,
 ) -> None:
+    """Players can only confirm a release; 'reject' is no longer a valid decision."""
     release = PlayerRelease(
         registration_id=active_registration.id,
         player_id=player.id,
@@ -247,9 +266,9 @@ def test_decide_reject_does_not_change_registration(
     response = client.post(
         f"/releases/{release.id}/decide/", json={"decision": "reject"}
     )
-    assert response.status_code == 200
-    assert response.json()["status"] == "rejected"
+    assert response.status_code == 422  # schema no longer accepts "reject"
 
+    # Registration must remain ACTIVE — the release was not processed
     db.expire_all()
     db.refresh(active_registration)
     assert active_registration.status == PlayerSeasonRegistrationStatus.ACTIVE

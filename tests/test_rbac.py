@@ -940,6 +940,20 @@ def test_release_create_writes_audit_log(db: Session) -> None:
     db.commit()
     db.refresh(reg)
 
+    # Squad must be submitted before a release can be created
+    from app.models.club_season import (  # noqa: PLC0415
+        ClubSeasonProfile,
+        ClubSeasonProfileStatus,
+    )
+
+    profile = ClubSeasonProfile(
+        club_id=club.id,
+        season_id=season.id,
+        status=ClubSeasonProfileStatus.SUBMITTED,
+    )
+    db.add(profile)
+    db.commit()
+
     club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
     with make_client(db, club_admin) as c:
         response = c.post(
