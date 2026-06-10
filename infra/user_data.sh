@@ -18,8 +18,8 @@ exec > >(tee /var/log/user-data.log | logger -t user-data) 2>&1
 dnf update -y
 dnf install -y python3.11 python3.11-pip git nginx amazon-cloudwatch-agent
 
-# Make python3.11 the default python3
-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+# Do NOT override the system python3 alternative — dnf is a Python script
+# that only works with the system Python. All app commands use python3.11 directly.
 
 # =============================================================================
 # 2. Clone the application repo
