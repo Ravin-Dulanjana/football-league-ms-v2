@@ -32,6 +32,10 @@ dev = [
     "ruff>=0.15.0",
     "mypy>=2.0.0",
     "pre-commit>=3.7.0",
+    # test_auth.py builds RSA key pairs to sign test JWTs.
+    # Declared explicitly here because PyJWT[cryptography]'s extra is not always
+    # resolved when the base PyJWT wheel is already cached in pip's download cache.
+    "cryptography>=41.0.0",
 ]
 
 [tool.setuptools.packages.find]
