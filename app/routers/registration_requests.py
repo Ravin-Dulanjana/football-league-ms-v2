@@ -51,7 +51,9 @@ def decide_request(
     request_id: int,
     data: RegistrationDecide,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_role("player")),
+    current_user: CurrentUser = Depends(
+        require_role("player", "super_admin", "league_admin")
+    ),
 ) -> RegistrationRequest:
     req = registration_service.get_request_by_id(db, request_id)
     if req is None:

@@ -143,7 +143,8 @@ def decide_request(
             "request_id": request_id_var.get(),
         }
     )
-    if current_user.player_id != req.player_id:
+    admin_roles = {"super_admin", "league_admin"}
+    if current_user.role not in admin_roles and current_user.player_id != req.player_id:
         return None, "Only the requested player can decide on their own registration."
 
     if req.status != RegistrationRequestStatus.PENDING_PLAYER_CONFIRMATION:
