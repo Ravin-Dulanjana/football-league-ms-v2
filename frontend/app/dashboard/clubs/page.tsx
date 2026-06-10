@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, Plus } from "lucide-react";
+import { Building2, ChevronRight, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ import {
 } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useRouter } from "next/navigation";
 import { clubsApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import type { ClubRead } from "@/types";
@@ -51,6 +52,7 @@ export default function ClubsPage() {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
   const { isLeagueLevel } = useCurrentUser();
+  const router = useRouter();
 
   const { data: clubs, isLoading, error, refetch } = useQuery<ClubRead[]>({
     queryKey: ["clubs"],
@@ -121,11 +123,16 @@ export default function ClubsPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="w-6" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {clubs.map((club) => (
-                <TableRow key={club.id} className="hover:bg-muted/50">
+                <TableRow
+                  key={club.id}
+                  className="hover:bg-muted/50 cursor-pointer"
+                  onClick={() => router.push(`/dashboard/clubs/${club.id}`)}
+                >
                   <TableCell>
                     <div>
                       <p className="font-medium">{club.name}</p>
@@ -143,6 +150,9 @@ export default function ClubsPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {formatDate(club.created_at)}
+                  </TableCell>
+                  <TableCell className="w-6">
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </TableCell>
                 </TableRow>
               ))}

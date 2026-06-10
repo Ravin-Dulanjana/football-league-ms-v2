@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { MoreHorizontal, Plus, Users } from "lucide-react";
+import { ChevronRight, MoreHorizontal, Plus, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -277,6 +278,7 @@ function CreateUserDialog({
 // ---------------------------------------------------------------------------
 
 export default function UsersPage() {
+  const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<{
     user: UserRead;
@@ -350,11 +352,16 @@ export default function UsersPage() {
                 <TableHead>Last login</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead />
+                <TableHead className="w-6" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {users.map((user) => (
-                <TableRow key={user.id} className="hover:bg-muted/50">
+                <TableRow
+                  key={user.id}
+                  className="hover:bg-muted/50 cursor-pointer"
+                  onClick={() => router.push(`/dashboard/users/${user.id}`)}
+                >
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm">{user.email}</span>
@@ -380,7 +387,7 @@ export default function UsersPage() {
                   <TableCell className="text-sm text-muted-foreground">
                     {formatDate(user.created_at)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-7 w-7">
@@ -427,6 +434,9 @@ export default function UsersPage() {
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
+                  </TableCell>
+                  <TableCell className="w-6">
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </TableCell>
                 </TableRow>
               ))}

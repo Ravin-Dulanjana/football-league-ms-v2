@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Shirt } from "lucide-react";
+import { ChevronRight, Shirt } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import {
   Table,
@@ -23,6 +24,7 @@ import { formatDate } from "@/lib/utils";
 import type { PlayerRead } from "@/types";
 
 export default function PlayersPage() {
+  const router = useRouter();
   const { data: players, isLoading, error, refetch } = useQuery<PlayerRead[]>({
     queryKey: ["players"],
     queryFn: playersApi.list,
@@ -55,11 +57,16 @@ export default function PlayersPage() {
                 <TableHead>Date of birth</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="w-6" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {players.map((player) => (
-                <TableRow key={player.id} className="hover:bg-muted/50">
+                <TableRow
+                  key={player.id}
+                  className="hover:bg-muted/50 cursor-pointer"
+                  onClick={() => router.push(`/dashboard/players/${player.id}`)}
+                >
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {player.league_player_code}
                   </TableCell>
@@ -70,6 +77,9 @@ export default function PlayersPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatDate(player.created_at)}
+                  </TableCell>
+                  <TableCell className="w-6">
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </TableCell>
                 </TableRow>
               ))}
