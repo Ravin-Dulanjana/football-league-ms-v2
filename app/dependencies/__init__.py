@@ -48,7 +48,6 @@ import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt.algorithms import RSAAlgorithm
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -113,6 +112,11 @@ def _refresh_jwks() -> None:
         logger.debug("COGNITO_JWKS_URL not configured — JWKS fetch skipped")
         return
     try:
+        # Lazy import — avoids top-level collision between PyJWT and python-jwt.
+        # RSAAlgorithm is only needed here; tests never reach this path because
+        # they override get_current_user via dependency_overrides.
+        from jwt.algorithms import RSAAlgorithm  # noqa: PLC0415
+
         response = httpx.get(settings.cognito_jwks_url, timeout=5.0)
         response.raise_for_status()
         _jwks_by_kid.clear()
