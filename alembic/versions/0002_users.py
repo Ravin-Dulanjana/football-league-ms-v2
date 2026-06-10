@@ -1,7 +1,7 @@
 """Add users table for Cognito shadow records.
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0002b
+Revises: 0002
 Create Date: 2026-06-09
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0002"
-down_revision = "0001"
+revision = "0002b"
+down_revision = "0002"
 branch_labels = None
 depends_on = None
 
