@@ -371,7 +371,10 @@ def _cognito_create_user(
             UserAttributes=user_attributes,
             MessageAction="SUPPRESS",  # we send our own email
         )
-        sub: str = resp["User"]["Username"]
+        # The JWT "sub" claim is a UUID in Attributes, not resp["User"]["Username"]
+        # (which is the email). We must store the UUID so user_sync lookups match.
+        attrs = {a["Name"]: a["Value"] for a in resp["User"]["Attributes"]}
+        sub: str = attrs["sub"]
         return sub
     except Exception:
         logger.exception({"event": "cognito.admin_create_user.error", "email": email})
