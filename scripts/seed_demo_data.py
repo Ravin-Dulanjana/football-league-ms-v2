@@ -23,7 +23,12 @@ import json
 import sys
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+
+try:
+    from datetime import UTC  # Python 3.11+
+except ImportError:
+    UTC = UTC  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Demo data definitions
