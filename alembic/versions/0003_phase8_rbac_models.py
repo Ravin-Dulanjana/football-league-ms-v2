@@ -1,7 +1,7 @@
 """Phase 8 — add audit_logs, notifications, club season models, user lifecycle fields.
 
 Revision ID: 0003
-Revises: 0002
+Revises: 0002b
 Create Date: 2026-06-10
 
 Changes:
@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0003"
-down_revision = "0002"
+down_revision = "0002b"
 branch_labels = None
 depends_on = None
 
