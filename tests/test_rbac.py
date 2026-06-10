@@ -118,16 +118,36 @@ def test_super_admin_can_list_seasons_without_auth(
 
 
 # ---------------------------------------------------------------------------
-# Test 2: league_admin cannot create league_admin accounts
+# Test 2: league_admin cannot create super_admin accounts
 # ---------------------------------------------------------------------------
 
 
-def test_league_admin_cannot_create_league_admin_account(
+def test_league_admin_cannot_create_super_admin_account(
     db: Session,
 ) -> None:
     """
-    league_admin can only create club_admin accounts.
-    Trying to create a league_admin account must return 400.
+    league_admin may create any role except super_admin.
+    Trying to create a super_admin account must return 400.
+    """
+    league_admin = CurrentUser(id=10, role="league_admin")
+    with make_client(db, league_admin) as c:
+        response = c.post(
+            "/users/",
+            json={
+                "email": "newsuperadmin@test.com",
+                "role": "super_admin",
+                "temporary_password": "Temp1234!",
+            },
+        )
+    assert response.status_code == 400, response.text
+    assert "super_admin" in response.json()["detail"].lower()
+
+
+def test_league_admin_can_create_league_admin_account(
+    db: Session,
+) -> None:
+    """
+    league_admin is allowed to create another league_admin account.
     """
     league_admin = CurrentUser(id=10, role="league_admin")
     with make_client(db, league_admin) as c:
@@ -139,8 +159,8 @@ def test_league_admin_cannot_create_league_admin_account(
                 "temporary_password": "Temp1234!",
             },
         )
-    assert response.status_code == 400, response.text
-    assert "club_admin" in response.json()["detail"].lower()
+    assert response.status_code == 201, response.text
+    assert response.json()["role"] == "league_admin"
 
 
 def test_league_admin_can_create_club_admin_account(
