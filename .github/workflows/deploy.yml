@@ -119,7 +119,8 @@ jobs:
               echo "SSH into the EC2 and run the manual setup from the project docs." >&2
               exit 1
             fi
-            sudo systemctl start postgresql
+            sudo systemctl enable postgresql  # persist across reboots
+            sudo systemctl start postgresql   # no-op if already running
 
             echo "=== Running Alembic migrations ==="
             .venv/bin/alembic upgrade head
