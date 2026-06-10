@@ -20,10 +20,10 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: {
-    default: "Football League MS",
-    template: "%s | Football League MS",
+    default: "Wattala Football League",
+    template: "%s | Wattala Football League",
   },
-  description: "Football League Management System — registration, releases, and season management.",
+  description: "Wattala Football League Management System — registration, releases, and season management.",
 };
 
 export default function RootLayout({

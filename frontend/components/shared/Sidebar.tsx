@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -126,12 +127,17 @@ export function Sidebar() {
     <aside className="flex flex-col w-56 border-r border-border bg-card shrink-0 h-full">
       {/* Brand */}
       <div className="flex items-center gap-2.5 px-4 h-14 border-b border-border">
-        <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary text-primary-foreground text-xs font-bold">
-          FL
+        <Image
+          src="/logo.png"
+          alt="Wattala Football League"
+          width={32}
+          height={32}
+          className="rounded-full shrink-0"
+        />
+        <div className="leading-tight min-w-0">
+          <p className="font-semibold text-xs text-foreground tracking-tight truncate">Wattala</p>
+          <p className="text-xs text-muted-foreground truncate">Football League</p>
         </div>
-        <span className="font-semibold text-sm text-foreground tracking-tight">
-          Football League
-        </span>
       </div>
 
       {/* Nav */}

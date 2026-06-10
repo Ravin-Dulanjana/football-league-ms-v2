@@ -44,6 +44,11 @@ const config: Config = {
           DEFAULT: "hsl(var(--popover))",
           foreground: "hsl(var(--popover-foreground))",
         },
+        // WFL brand colors (for direct use as utility classes)
+        league: {
+          navy: "#1a3563",
+          gold: "#c9a227",
+        },
         // Semantic status colors (consistent across all badges)
         status: {
           active: "#22c55e",

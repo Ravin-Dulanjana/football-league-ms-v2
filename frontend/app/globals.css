@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    /* Light mode — slate-50 base with electric blue accent */
+    /* Light mode — Wattala Football League navy + gold */
     --background: 210 40% 98%;
     --foreground: 222 47% 11%;
 
@@ -14,8 +14,8 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    /* Electric blue: hsl(217 91% 60%) */
-    --primary: 217 91% 60%;
+    /* WFL navy: hsl(220 57% 24%) = #1a3563 */
+    --primary: 220 57% 24%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 210 40% 96%;
@@ -32,7 +32,7 @@
 
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 217 91% 60%;
+    --ring: 220 57% 24%;
 
     --radius: 0.5rem;
   }
@@ -48,8 +48,8 @@
     --popover: 222 47% 10%;
     --popover-foreground: 210 40% 98%;
 
-    /* Electric blue stays the same in dark mode */
-    --primary: 217 91% 60%;
+    /* Lighter navy for dark backgrounds */
+    --primary: 220 57% 55%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 217 33% 17%;
@@ -66,7 +66,7 @@
 
     --border: 217 33% 17%;
     --input: 217 33% 17%;
-    --ring: 217 91% 60%;
+    --ring: 220 57% 55%;
   }
 }
 
