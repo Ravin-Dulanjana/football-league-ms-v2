@@ -16,7 +16,6 @@ import {
   Shield,
   Shirt,
   Users,
-  UserSquare2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -54,12 +53,6 @@ const NAV_ITEMS: NavItem[] = [
     label: "Releases",
     href: "/dashboard/releases",
     icon: FileText,
-    roles: ["super_admin", "league_admin", "club_admin"],
-  },
-  {
-    label: "Support Staff",
-    href: "/dashboard/staff",
-    icon: UserSquare2,
     roles: ["super_admin", "league_admin", "club_admin"],
   },
   {

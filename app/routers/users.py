@@ -31,6 +31,36 @@ from app.services import user_service
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+@router.get("/me/", response_model=UserRead)
+def get_me(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_admin),
+) -> User:
+    """Return the currently authenticated user's own record."""
+    user = user_service.get_user_by_id(db, current_user.id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    return user
+
+
+@router.get("/{user_id}/", response_model=UserRead)
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_any_admin),
+) -> User:
+    """Any admin can fetch any user. Players/club-admins only see their own record."""
+    if (
+        current_user.role not in ("super_admin", "league_admin")
+        and current_user.id != user_id
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied.")
+    user = user_service.get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    return user
+
+
 @router.get("/", response_model=list[UserRead])
 def list_users(
     include_deleted: bool = Query(False, alias="include_deleted"),

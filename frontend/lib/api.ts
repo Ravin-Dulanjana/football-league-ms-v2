@@ -250,6 +250,7 @@ export const releasesApi = {
 export const usersApi = {
   list: (includeDeleted = false) =>
     apiFetch<UserRead[]>(`/users/?include_deleted=${includeDeleted}`),
+  get: (id: number) => apiFetch<UserRead>(`/users/${id}/`),
   create: (data: UserCreate) =>
     apiFetch<UserRead>("/users/", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, reason: string) =>
