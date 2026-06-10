@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser, get_current_user
 from app.models.club import Club, ClubStatus
+from app.models.club_season import ClubSeasonProfile, ClubSeasonProfileStatus
 from app.models.player import Player
 from app.models.registration import (
     PlayerSeasonRegistration,
@@ -354,8 +355,17 @@ def test_create_release_stores_s3_key_not_url(
     The document in the response includes the computed CloudFront URL
     (file_url) AND the raw S3 key (s3_key).
     """
+    # Squad must be submitted before a release can be created
+    profile = ClubSeasonProfile(
+        club_id=_active_registration.club_id,
+        season_id=_active_registration.season_id,
+        status=ClubSeasonProfileStatus.SUBMITTED,
+    )
+    db.add(profile)
+    db.commit()
+
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=999, role="league_admin"
+        id=999, role="club_admin", club_id=_active_registration.club_id
     )
 
     s3_key = "releases/documents/a1b2c3d4-test.pdf"
