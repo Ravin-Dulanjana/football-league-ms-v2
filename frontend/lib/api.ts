@@ -32,6 +32,7 @@ import type {
   NotificationRead,
   PlayerCreate,
   PlayerRead,
+  PlayerSeasonRegistrationRead,
   PlayerUpdate,
   RegistrationRequestCreate,
   RegistrationRequestRead,
@@ -217,11 +218,19 @@ export const registrationsApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  decide: (id: number, decision: "accept" | "reject") =>
+  decide: (id: number, decision: "accept") =>
     apiFetch<RegistrationRequestRead>(`/registration-requests/${id}/decide/`, {
       method: "POST",
       body: JSON.stringify({ decision }),
     }),
+  listPlayerSeasonRegistrations: (params?: { club_id?: number; season_id?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.club_id) q.set("club_id", String(params.club_id));
+    if (params?.season_id) q.set("season_id", String(params.season_id));
+    return apiFetch<PlayerSeasonRegistrationRead[]>(
+      `/registration-requests/player-season-registrations/?${q}`
+    );
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -232,7 +241,7 @@ export const releasesApi = {
   list: () => apiFetch<ReleaseRead[]>("/releases/"),
   create: (data: ReleaseCreate) =>
     apiFetch<ReleaseRead>("/releases/", { method: "POST", body: JSON.stringify(data) }),
-  decide: (id: number, decision: "confirm" | "reject") =>
+  decide: (id: number, decision: "confirm") =>
     apiFetch<ReleaseRead>(`/releases/${id}/decide/`, {
       method: "POST",
       body: JSON.stringify({ decision }),

@@ -53,6 +53,31 @@ def create_release(
     if registration.status != PlayerSeasonRegistrationStatus.ACTIVE:
         return None, "Only active registrations can be released."
 
+    # Guard: squad list must have been submitted before a release is possible
+    from app.models.club_season import (  # noqa: PLC0415
+        ClubSeasonProfile,
+        ClubSeasonProfileStatus,
+    )
+
+    profile = db.execute(
+        select(ClubSeasonProfile).where(
+            ClubSeasonProfile.club_id == registration.club_id,
+            ClubSeasonProfile.season_id == registration.season_id,
+        )
+    ).scalar_one_or_none()
+    submitted_statuses = {
+        ClubSeasonProfileStatus.SUBMITTED,
+        ClubSeasonProfileStatus.RESUBMITTED,
+        ClubSeasonProfileStatus.REVIEWED,
+        ClubSeasonProfileStatus.APPROVED,
+    }
+    if profile is None or profile.status not in submitted_statuses:
+        return (
+            None,
+            "The club's squad list must be submitted to the league"
+            " before releasing a player.",
+        )
+
     existing = db.execute(
         select(PlayerRelease).where(
             PlayerRelease.registration_id == data.registration_id
@@ -145,29 +170,6 @@ def decide_release(
         return None, "This release has already been processed."
 
     now = datetime.now(tz=UTC)
-
-    if decision == "reject":
-        release.status = ReleaseStatus.REJECTED
-        release.confirmed_at = now
-        db.flush()
-        audit_service.write_audit_log(
-            db,
-            actor_id=current_user.id,
-            action="release.reject",
-            entity_type="PlayerRelease",
-            entity_id=release.id,
-        )
-        db.commit()
-        db.refresh(release)
-        logger.info(
-            {
-                "event": "decide_release.complete",
-                "release_id": release.id,
-                "outcome": "rejected",
-                "request_id": request_id_var.get(),
-            }
-        )
-        return release, None
 
     # confirm — update both release and registration atomically
     release.status = ReleaseStatus.CONFIRMED

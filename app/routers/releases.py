@@ -60,20 +60,16 @@ def get_document_upload_url(
 def create_release(
     data: ReleaseCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(
-        require_role("super_admin", "league_admin", "club_admin")
-    ),
+    current_user: CurrentUser = Depends(require_role("club_admin")),
 ) -> PlayerRelease:
-    # Club admins can only initiate releases for players in their own club
-    if current_user.role == "club_admin":
-        from app.models.registration import PlayerSeasonRegistration  # noqa: PLC0415
+    from app.models.registration import PlayerSeasonRegistration  # noqa: PLC0415
 
-        reg = db.get(PlayerSeasonRegistration, data.registration_id)
-        if reg is not None and reg.club_id != current_user.club_id:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "Club admins can only initiate releases for their own club's players.",
-            )
+    reg = db.get(PlayerSeasonRegistration, data.registration_id)
+    if reg is not None and reg.club_id != current_user.club_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You can only release players registered to your own club.",
+        )
     release, error = release_service.create_release(db, data, current_user)
     if error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, error)

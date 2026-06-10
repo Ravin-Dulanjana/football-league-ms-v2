@@ -24,7 +24,7 @@ class ReleaseCreate(BaseModel):
 
 
 class ReleaseDecide(BaseModel):
-    decision: Literal["confirm", "reject"]
+    decision: Literal["confirm"]
 
 
 class ReleaseDocumentRead(BaseModel):

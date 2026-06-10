@@ -2,12 +2,12 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Calendar, CreditCard, Hash } from "lucide-react";
+import { ArrowLeft, Calendar, CreditCard, ExternalLink, FileText, Hash } from "lucide-react";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { playersApi, clubsApi, registrationsApi } from "@/lib/api";
+import { playersApi, clubsApi, registrationsApi, releasesApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import type { ClubRead, PlayerRead, RegistrationRequestRead } from "@/types";
+import type { ClubRead, PlayerRead, RegistrationRequestRead, ReleaseRead } from "@/types";
 
 export default function PlayerDetailPage() {
   const params = useParams();
@@ -24,6 +24,15 @@ export default function PlayerDetailPage() {
     queryFn: registrationsApi.list,
     enabled: !!player,
   });
+
+  const { data: allReleases = [] } = useQuery<ReleaseRead[]>({
+    queryKey: ["releases"],
+    queryFn: releasesApi.list,
+    enabled: !!player,
+  });
+  const playerReleases = allReleases.filter(
+    (r) => r.player_id === playerId && r.status === "confirmed"
+  );
 
   const { data: allClubs = [] } = useQuery<ClubRead[]>({
     queryKey: ["clubs"],
@@ -148,6 +157,54 @@ export default function PlayerDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Release history */}
+      {playerReleases.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+            Release history
+          </p>
+          <div className="space-y-2">
+            {playerReleases.map((release) => (
+              <div
+                key={release.id}
+                className="flex items-start justify-between p-4 rounded-lg border border-border bg-card gap-4"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">
+                    Released from Club {release.from_club_id}
+                  </p>
+                  {release.effective_date && (
+                    <p className="text-xs text-muted-foreground">
+                      Effective: {formatDate(release.effective_date)}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Confirmed: {formatDate(release.confirmed_at)}
+                  </p>
+                </div>
+                {release.documents.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    {release.documents.map((doc) => (
+                      <a
+                        key={doc.id}
+                        href={doc.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                      >
+                        <FileText className="h-3 w-3" />
+                        {doc.file_name}
+                        <ExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Current club */}
       {currentClub && (

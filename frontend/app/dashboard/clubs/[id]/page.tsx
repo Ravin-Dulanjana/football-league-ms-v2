@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Building2,
+  CheckCircle2,
+  ClipboardCheck,
   Mail,
   Plus,
   Shield,
@@ -41,12 +43,22 @@ import {
 } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { clubsApi, staffApi, usersApi, registrationsApi, playersApi, seasonsApi } from "@/lib/api";
+import {
+  clubsApi,
+  staffApi,
+  usersApi,
+  registrationsApi,
+  playersApi,
+  seasonsApi,
+  profilesApi,
+} from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import type {
   ClubRead,
+  ClubSeasonProfileRead,
   ClubStaffRead,
   PlayerRead,
+  PlayerSeasonRegistrationRead,
   RegistrationRequestRead,
   SeasonRead,
   UserRead,
@@ -56,13 +68,14 @@ import type {
 // Segment navigation
 // ---------------------------------------------------------------------------
 
-type Segment = "overview" | "players" | "staff" | "admins";
+type Segment = "overview" | "players" | "staff" | "admins" | "squad";
 
 const SEGMENTS: { id: Segment; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Building2 },
   { id: "players", label: "Players", icon: Shirt },
   { id: "staff", label: "Support Staff", icon: UserSquare2 },
   { id: "admins", label: "Admins", icon: Shield },
+  { id: "squad", label: "Season Squad", icon: ClipboardCheck },
 ];
 
 // ---------------------------------------------------------------------------
@@ -218,6 +231,69 @@ export default function ClubDetailPage() {
     queryKey: ["users"],
     queryFn: () => usersApi.list(),
     enabled: segment === "admins",
+  });
+
+  // Season / Squad segment
+  const { data: seasons = [] } = useQuery<SeasonRead[]>({
+    queryKey: ["seasons"],
+    queryFn: seasonsApi.list,
+    enabled: segment === "squad",
+  });
+  // Find the open season or fallback to the latest
+  const currentSeason = seasons.find((s) => s.status === "open") ?? seasons[seasons.length - 1];
+
+  const { data: profiles = [] } = useQuery<ClubSeasonProfileRead[]>({
+    queryKey: ["profiles"],
+    queryFn: profilesApi.list,
+    enabled: segment === "squad",
+  });
+  const currentProfile = profiles.find(
+    (p) => p.club_id === clubId && p.season_id === (currentSeason?.id ?? -1)
+  );
+
+  const { data: squadRegistrations = [] } = useQuery<PlayerSeasonRegistrationRead[]>({
+    queryKey: ["player-season-registrations", clubId, currentSeason?.id],
+    queryFn: () =>
+      registrationsApi.listPlayerSeasonRegistrations({
+        club_id: clubId,
+        season_id: currentSeason?.id,
+      }),
+    enabled: segment === "squad" && !!currentSeason,
+  });
+
+  const { data: squadStaff = [] } = useQuery<ClubStaffRead[]>({
+    queryKey: ["club-staff", clubId, currentSeason?.id],
+    queryFn: () => staffApi.list(clubId, currentSeason?.id),
+    enabled: segment === "squad" && !!currentSeason,
+  });
+
+  const { data: allPlayersForSquad = [] } = useQuery<PlayerRead[]>({
+    queryKey: ["players"],
+    queryFn: playersApi.list,
+    enabled: segment === "squad",
+  });
+  const squadPlayerMap = new Map(allPlayersForSquad.map((p) => [p.id, p]));
+
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      // Create profile if it doesn't exist yet
+      if (!currentProfile) {
+        await profilesApi.create({ club_id: clubId, season_id: currentSeason!.id });
+        // Re-fetch profiles to get the new one
+        const updated = await profilesApi.list();
+        const newProfile = updated.find(
+          (p) => p.club_id === clubId && p.season_id === currentSeason!.id
+        );
+        if (!newProfile) throw new Error("Could not create squad profile");
+        return profilesApi.submit(newProfile.id);
+      }
+      return profilesApi.submit(currentProfile.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      toast.success("Squad list submitted to the league");
+    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const { data: allRegistrations = [] } = useQuery<RegistrationRequestRead[]>({
@@ -488,6 +564,153 @@ export default function ClubDetailPage() {
                 </button>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {segment === "squad" && (
+        <div className="space-y-6">
+          {!currentSeason ? (
+            <p className="text-sm text-muted-foreground">No season available.</p>
+          ) : (
+            <>
+              {/* Status banner */}
+              <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-card">
+                <div>
+                  <p className="text-sm font-semibold">{currentSeason.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Registration:{" "}
+                    {formatDate(currentSeason.registration_open_at)} —{" "}
+                    {formatDate(currentSeason.registration_close_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {currentProfile && (
+                    <StatusBadge status={currentProfile.status} />
+                  )}
+                  {isOwnClubAdmin &&
+                    (!currentProfile ||
+                      currentProfile.status === "draft" ||
+                      currentProfile.status === "returned") && (
+                      <Button
+                        size="sm"
+                        onClick={() => submitMutation.mutate()}
+                        disabled={submitMutation.isPending || squadRegistrations.length === 0}
+                        className="gap-1.5"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        {submitMutation.isPending ? "Submitting…" : "Submit squad list"}
+                      </Button>
+                    )}
+                  {currentProfile?.status === "submitted" ||
+                  currentProfile?.status === "resubmitted" ? (
+                    <p className="text-xs text-muted-foreground">
+                      Submitted {formatDate(currentProfile.submitted_at)}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Players */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  Players ({squadRegistrations.length}/30)
+                </p>
+                {squadRegistrations.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border p-6 text-center">
+                    <Shirt className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      No players registered yet. Send registration requests from the
+                      Registrations page.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {squadRegistrations.map((reg) => {
+                      const player = squadPlayerMap.get(reg.player_id);
+                      return (
+                        <button
+                          key={reg.id}
+                          onClick={() =>
+                            router.push(`/dashboard/players/${reg.player_id}`)
+                          }
+                          className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors text-left"
+                        >
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">
+                            {player
+                              ? player.full_name
+                                  .split(" ")
+                                  .map((n) => n[0])
+                                  .join("")
+                                  .slice(0, 2)
+                              : "?"}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {player?.full_name ?? `Player ${reg.player_id}`}
+                            </p>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {player?.league_player_code ?? ""}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Staff */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Support Staff ({squadStaff.length}/6)
+                  </p>
+                  {isOwnClubAdmin && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setAddStaffOpen(true)}
+                      className="gap-1.5 h-7 text-xs"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add
+                    </Button>
+                  )}
+                </div>
+                {squadStaff.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border p-6 text-center">
+                    <UserSquare2 className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No support staff added yet.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {squadStaff.map((s) => (
+                      <div
+                        key={s.id}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card"
+                      >
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-muted-foreground text-xs font-bold shrink-0">
+                          {s.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{s.full_name}</p>
+                          <p className="text-xs text-muted-foreground">{s.role}</p>
+                        </div>
+                        {isOwnClubAdmin && (
+                          <button
+                            onClick={() => setDeleteStaffTarget(s)}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

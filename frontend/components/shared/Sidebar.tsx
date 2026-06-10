@@ -11,6 +11,7 @@ import {
   FileText,
   Home,
   Key,
+  ListChecks,
   LogOut,
   ScrollText,
   Shield,
@@ -42,24 +43,18 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Players", href: "/dashboard/players", icon: Shirt },
   { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
 
-  // Club admin and above
+  // Player + club admin
   {
     label: "Registrations",
     href: "/dashboard/registrations",
     icon: ClipboardList,
-    roles: ["super_admin", "league_admin", "club_admin"],
+    roles: ["club_admin", "player"],
   },
   {
     label: "Releases",
     href: "/dashboard/releases",
     icon: FileText,
-    roles: ["super_admin", "league_admin", "club_admin"],
-  },
-  {
-    label: "Unlock Requests",
-    href: "/dashboard/unlock-requests",
-    icon: Key,
-    roles: ["super_admin", "league_admin", "club_admin"],
+    roles: ["club_admin", "player"],
   },
 
   // League admin and above
@@ -67,6 +62,18 @@ const NAV_ITEMS: NavItem[] = [
     label: "Seasons",
     href: "/dashboard/seasons",
     icon: ScrollText,
+    roles: ["super_admin", "league_admin"],
+  },
+  {
+    label: "Squad Submissions",
+    href: "/dashboard/submissions",
+    icon: ListChecks,
+    roles: ["super_admin", "league_admin"],
+  },
+  {
+    label: "Unlock Requests",
+    href: "/dashboard/unlock-requests",
+    icon: Key,
     roles: ["super_admin", "league_admin"],
   },
   {
