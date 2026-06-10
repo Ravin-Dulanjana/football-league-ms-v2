@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class UserRead(BaseModel):
@@ -25,16 +25,24 @@ class UserRead(BaseModel):
 class UserCreate(BaseModel):
     """
     Used by super_admin and league_admin to create user accounts.
-    league_admin may only create club_admin accounts.
+
+    When role=player, pass full_name, date_of_birth, and nic_number.
+    The backend creates the Player record automatically — do not pass player_id.
+
+    When role=club_admin, club_id is required.
     """
 
     email: str
     role: str
     club_id: int | None = None
-    player_id: int | None = None
     # Temporary password — must be changed on first login.
     # Must meet Cognito's password policy (min 8, upper, lower, digit, symbol).
     temporary_password: str
+
+    # Player profile fields — required when role=player, ignored otherwise.
+    full_name: str | None = None
+    date_of_birth: date | None = None
+    nic_number: str | None = None
 
     @field_validator("role")
     @classmethod
@@ -43,6 +51,21 @@ class UserCreate(BaseModel):
         if v not in valid:
             raise ValueError(f"role must be one of {valid}")
         return v
+
+    @model_validator(mode="after")
+    def player_fields_required(self) -> UserCreate:
+        if self.role == "player":
+            missing = [
+                f
+                for f in ("full_name", "date_of_birth", "nic_number")
+                if not getattr(self, f)
+            ]
+            if missing:
+                raise ValueError(
+                    f"full_name, date_of_birth, and nic_number are required "
+                    f"when role=player (missing: {', '.join(missing)})"
+                )
+        return self
 
 
 class AccountActionRequest(BaseModel):

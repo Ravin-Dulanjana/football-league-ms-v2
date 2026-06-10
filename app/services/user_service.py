@@ -29,9 +29,11 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.dependencies import CurrentUser
 from app.middleware.logging import get_logger
+from app.models.player import Player  # used for type annotation of new_player
 from app.models.user import User
+from app.schemas.player import PlayerCreate
 from app.schemas.user import AccountActionRequest, UserCreate
-from app.services import audit_service
+from app.services import audit_service, player_service
 from app.services.role_checks import is_super_admin
 
 logger = get_logger(__name__)
@@ -91,10 +93,6 @@ def create_user(
     if target_role == "club_admin" and not data.club_id:
         return None, "club_id is required when creating a club_admin account."
 
-    # player role requires a player_id
-    if target_role == "player" and not data.player_id:
-        return None, "player_id is required when creating a player account."
-
     # Check email is not already taken
     existing = db.execute(
         select(User).where(User.email == data.email)
@@ -102,15 +100,36 @@ def create_user(
     if existing:
         return None, "A user with that email already exists."
 
+    # For player accounts, create the Player profile first so we get a player_id.
+    player_id: int | None = None
+    new_player: Player | None = None
+    if target_role == "player":
+        try:
+            new_player = player_service.create_player(
+                db,
+                PlayerCreate(
+                    full_name=data.full_name,  # type: ignore[arg-type]
+                    date_of_birth=data.date_of_birth,  # type: ignore[arg-type]
+                    nic_number=data.nic_number,  # type: ignore[arg-type]
+                ),
+            )
+        except Exception:
+            return None, "A player with that NIC number already exists."
+        player_id = new_player.id
+
     # Create in Cognito
     cognito_sub = _cognito_create_user(
         email=data.email,
         temporary_password=data.temporary_password,
         role=data.role,
         club_id=data.club_id,
-        player_id=data.player_id,
+        player_id=player_id,
     )
     if cognito_sub is None:
+        # Roll back the player record we just created before failing.
+        if new_player is not None:
+            db.delete(new_player)
+            db.commit()
         return None, "Failed to create Cognito user. Check Cognito configuration."
 
     user = User(
@@ -118,7 +137,7 @@ def create_user(
         email=data.email,
         role=data.role,
         club_id=data.club_id,
-        player_id=data.player_id,
+        player_id=player_id,
         is_active=True,
         is_deleted=False,
         force_password_change=True,

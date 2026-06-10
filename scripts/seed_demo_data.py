@@ -57,27 +57,35 @@ CLUBS = [
 ]
 
 # 4 players per club — indexed [club_index][player]
+# Each player has an email so their user account can be created in one call.
+# Temporary password is the same for all demo players; they'd change it on first login.
+PLAYER_TEMP_PASSWORD = "Player@2026!"
+
 PLAYERS_BY_CLUB = [
     [
         {
             "full_name": "Ashan Perera",
             "date_of_birth": "1998-03-14",
             "nic_number": "982730150V",
+            "email": "ashan.perera@player.lk",
         },
         {
             "full_name": "Nuwan Silva",
             "date_of_birth": "2000-07-22",
             "nic_number": "200720350V",
+            "email": "nuwan.silva@player.lk",
         },
         {
             "full_name": "Kasun Fernando",
             "date_of_birth": "1997-11-05",
             "nic_number": "973095820V",
+            "email": "kasun.fernando@player.lk",
         },
         {
             "full_name": "Lahiru Jayantha",
             "date_of_birth": "2001-01-30",
             "nic_number": "200103080V",
+            "email": "lahiru.jayantha@player.lk",
         },
     ],
     [
@@ -85,21 +93,25 @@ PLAYERS_BY_CLUB = [
             "full_name": "Ruwan Dissanayake",
             "date_of_birth": "1999-06-18",
             "nic_number": "991700410V",
+            "email": "ruwan.dissanayake@player.lk",
         },
         {
             "full_name": "Saman Bandara",
             "date_of_birth": "1996-09-12",
             "nic_number": "962561230V",
+            "email": "saman.bandara@player.lk",
         },
         {
             "full_name": "Dilshan Herath",
             "date_of_birth": "2002-04-03",
             "nic_number": "202093780V",
+            "email": "dilshan.herath@player.lk",
         },
         {
             "full_name": "Chamara Kumara",
             "date_of_birth": "1995-12-25",
             "nic_number": "953600510V",
+            "email": "chamara.kumara@player.lk",
         },
     ],
     [
@@ -107,21 +119,25 @@ PLAYERS_BY_CLUB = [
             "full_name": "Pradeep Rajapaksa",
             "date_of_birth": "1998-08-07",
             "nic_number": "982201850V",
+            "email": "pradeep.rajapaksa@player.lk",
         },
         {
             "full_name": "Tharaka Mendis",
             "date_of_birth": "2003-02-14",
             "nic_number": "203450920V",
+            "email": "tharaka.mendis@player.lk",
         },
         {
             "full_name": "Buddhika Gunawardena",
             "date_of_birth": "1997-05-29",
             "nic_number": "971500480V",
+            "email": "buddhika.gunawardena@player.lk",
         },
         {
             "full_name": "Hasitha Liyanage",
             "date_of_birth": "2001-10-11",
             "nic_number": "201851220V",
+            "email": "hasitha.liyanage@player.lk",
         },
     ],
     [
@@ -129,21 +145,25 @@ PLAYERS_BY_CLUB = [
             "full_name": "Nirosh Arumugam",
             "date_of_birth": "1999-03-22",
             "nic_number": "990811450V",
+            "email": "nirosh.arumugam@player.lk",
         },
         {
             "full_name": "Jegan Selvaraj",
             "date_of_birth": "1996-07-04",
             "nic_number": "961861720V",
+            "email": "jegan.selvaraj@player.lk",
         },
         {
             "full_name": "Kumaran Navaratnam",
             "date_of_birth": "2000-11-19",
             "nic_number": "200324580V",
+            "email": "kumaran.navaratnam@player.lk",
         },
         {
             "full_name": "Siva Rajaratnam",
             "date_of_birth": "2002-06-30",
             "nic_number": "202821360V",
+            "email": "siva.rajaratnam@player.lk",
         },
     ],
 ]
@@ -227,10 +247,22 @@ def seed(api_base: str, email: str, password: str, dry_run: bool) -> None:
         print(f"  Created club #{club_id}")
 
         for player_data in PLAYERS_BY_CLUB[club_idx]:
-            print(f"  Creating player: {player_data['full_name']}...")
-            player = post(api_base, "/players/", player_data, token)
-            player_id = player["id"]
-            print(f"    Created player #{player_id}")
+            print(f"  Creating player account: {player_data['full_name']}...")
+            user = post(
+                api_base,
+                "/users/",
+                {
+                    "email": player_data["email"],
+                    "temporary_password": PLAYER_TEMP_PASSWORD,
+                    "role": "player",
+                    "full_name": player_data["full_name"],
+                    "date_of_birth": player_data["date_of_birth"],
+                    "nic_number": player_data["nic_number"],
+                },
+                token,
+            )
+            player_id = user["player_id"]
+            print(f"    Created user #{user['id']}, player #{player_id}")
 
             print("    Submitting registration request...")
             reg = post(
