@@ -107,6 +107,20 @@ jobs:
             echo "=== Installing/updating dependencies ==="
             .venv/bin/pip install -r requirements.txt --quiet
 
+            echo "=== Ensuring PostgreSQL is running ==="
+            # EC2-local mode: PostgreSQL runs on this server.
+            # systemctl start is a no-op if it's already active, so this is safe
+            # to run on every deploy. Prevents migration failure when the service
+            # drifts (e.g. after an EC2 stop/start cycle).
+            # Guard: if the unit doesn't exist, PostgreSQL was never installed
+            # (e.g. user_data.sh failed on first boot) — fail fast with a clear message.
+            if ! sudo systemctl list-unit-files postgresql.service | grep -q postgresql; then
+              echo "ERROR: postgresql.service not found. PostgreSQL is not installed on this server." >&2
+              echo "SSH into the EC2 and run the manual setup from the project docs." >&2
+              exit 1
+            fi
+            sudo systemctl start postgresql
+
             echo "=== Running Alembic migrations ==="
             .venv/bin/alembic upgrade head
 
