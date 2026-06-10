@@ -174,6 +174,10 @@ def post(base: str, path: str, body: dict, token: str) -> dict:
     return _request("POST", f"{base}{path}", body, token)
 
 
+def patch(base: str, path: str, body: dict, token: str) -> dict:
+    return _request("PATCH", f"{base}{path}", body, token)
+
+
 # ---------------------------------------------------------------------------
 # Main seeding logic
 # ---------------------------------------------------------------------------
@@ -209,6 +213,8 @@ def seed(api_base: str, email: str, password: str, dry_run: bool) -> None:
     season = post(api_base, "/seasons/", season_payload, token)
     season_id = season["id"]
     print(f"  Created season #{season_id}")
+    patch(api_base, f"/seasons/{season_id}/", {"status": "open"}, token)
+    print("  Season set to OPEN")
 
     # -- Clubs + Players + Registrations ------------------------------------
     for club_idx, club_data in enumerate(CLUBS):
