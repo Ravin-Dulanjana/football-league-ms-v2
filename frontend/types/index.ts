@@ -38,8 +38,11 @@ export interface UserCreate {
   email: string;
   role: UserRole;
   club_id?: number;
-  player_id?: number;
   temporary_password: string;
+  // Player profile — required when role=player, ignored otherwise.
+  full_name?: string;
+  date_of_birth?: string;
+  nic_number?: string;
 }
 
 export type AccountAction =

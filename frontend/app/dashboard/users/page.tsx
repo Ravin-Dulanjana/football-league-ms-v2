@@ -57,12 +57,29 @@ import type { AccountAction, ClubRead, UserRead, UserRole } from "@/types";
 // Create user dialog
 // ---------------------------------------------------------------------------
 
-const createSchema = z.object({
-  email: z.string().email("Invalid email"),
-  role: z.enum(["super_admin", "league_admin", "club_admin", "player"] as const),
-  club_id: z.number().optional(),
-  temporary_password: z.string().min(8, "At least 8 characters"),
-});
+const createSchema = z
+  .object({
+    email: z.string().email("Invalid email"),
+    role: z.enum(["super_admin", "league_admin", "club_admin", "player"] as const),
+    club_id: z.number().optional(),
+    temporary_password: z.string().min(8, "At least 8 characters"),
+    full_name: z.string().optional(),
+    date_of_birth: z.string().optional(),
+    nic_number: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.role === "player") {
+      if (!val.full_name?.trim()) {
+        ctx.addIssue({ code: "custom", path: ["full_name"], message: "Required for players" });
+      }
+      if (!val.date_of_birth) {
+        ctx.addIssue({ code: "custom", path: ["date_of_birth"], message: "Required for players" });
+      }
+      if (!val.nic_number?.trim()) {
+        ctx.addIssue({ code: "custom", path: ["nic_number"], message: "Required for players" });
+      }
+    }
+  });
 
 type CreateForm = z.infer<typeof createSchema>;
 
@@ -83,7 +100,14 @@ function CreateUserDialog({
 
   const form = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
-    defaultValues: { email: "", role: "club_admin", temporary_password: "" },
+    defaultValues: {
+      email: "",
+      role: "club_admin",
+      temporary_password: "",
+      full_name: "",
+      date_of_birth: "",
+      nic_number: "",
+    },
   });
 
   const role = form.watch("role");
@@ -93,8 +117,13 @@ function CreateUserDialog({
       usersApi.create({
         email: data.email,
         role: data.role,
-        club_id: data.club_id || undefined,
+        club_id: data.role === "club_admin" ? data.club_id : undefined,
         temporary_password: data.temporary_password,
+        ...(data.role === "player" && {
+          full_name: data.full_name,
+          date_of_birth: data.date_of_birth,
+          nic_number: data.nic_number,
+        }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -109,7 +138,7 @@ function CreateUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New user</DialogTitle>
+          <DialogTitle>{role === "player" ? "New player account" : "New user"}</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
@@ -147,9 +176,9 @@ function CreateUserDialog({
             />
           </div>
 
-          {(role === "club_admin" || role === "player") && (
+          {role === "club_admin" && (
             <div className="space-y-1.5">
-              <Label>Club</Label>
+              <Label>Club *</Label>
               <Controller
                 control={form.control}
                 name="club_id"
@@ -172,6 +201,46 @@ function CreateUserDialog({
                 )}
               />
             </div>
+          )}
+
+          {role === "player" && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="full_name">Full name *</Label>
+                <Input
+                  id="full_name"
+                  {...form.register("full_name")}
+                  placeholder="e.g. Kamal Perera"
+                />
+                {form.formState.errors.full_name && (
+                  <p className="text-xs text-destructive">
+                    {form.formState.errors.full_name.message}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="date_of_birth">Date of birth *</Label>
+                <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
+                {form.formState.errors.date_of_birth && (
+                  <p className="text-xs text-destructive">
+                    {form.formState.errors.date_of_birth.message}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nic_number">NIC number *</Label>
+                <Input
+                  id="nic_number"
+                  {...form.register("nic_number")}
+                  placeholder="e.g. 901234567V"
+                />
+                {form.formState.errors.nic_number && (
+                  <p className="text-xs text-destructive">
+                    {form.formState.errors.nic_number.message}
+                  </p>
+                )}
+              </div>
+            </>
           )}
 
           <div className="space-y-1.5">
