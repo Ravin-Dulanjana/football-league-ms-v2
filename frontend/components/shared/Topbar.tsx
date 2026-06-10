@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell } from "lucide-react";
@@ -41,14 +42,18 @@ export function Topbar({ mobile = false }: TopbarProps) {
         mobile ? "h-14 lg:hidden" : "h-14 hidden lg:flex"
       )}
     >
-      {/* Mobile: brand + hamburger */}
+      {/* Mobile: brand + notification bell */}
       {mobile ? (
         <>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary text-primary-foreground text-xs font-bold">
-              FL
-            </div>
-            <span className="font-semibold text-sm">Football League</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Image
+              src="/logo.png"
+              alt="Wattala Football League"
+              width={28}
+              height={28}
+              className="rounded-full shrink-0"
+            />
+            <span className="font-semibold text-sm truncate">Wattala Football League</span>
           </div>
           <Link href="/dashboard/notifications" className="relative">
             <Button variant="ghost" size="icon" className="h-8 w-8">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -151,18 +152,27 @@ function LoginContent() {
       <div className="w-full max-w-sm space-y-6">
 
         {/* Brand mark */}
-        <div className="text-center space-y-1">
-          <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-bold mb-2">
-            FL
+        <div className="text-center space-y-3">
+          <div className="flex justify-center">
+            <Image
+              src="/logo.png"
+              alt="Wattala Football League"
+              width={88}
+              height={88}
+              className="rounded-full"
+              priority
+            />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Football League MS
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {step === "login" && "Sign in to your account"}
-            {step === "otp" && "Enter your verification code"}
-            {step === "force_password" && "Set a new password to continue"}
-          </p>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Wattala Football League
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {step === "login" && "Sign in to your account"}
+              {step === "otp" && "Enter your verification code"}
+              {step === "force_password" && "Set a new password to continue"}
+            </p>
+          </div>
         </div>
 
         <Card className="border-border">
@@ -312,7 +322,7 @@ function LoginContent() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          Football League Management System v2
+          Wattala Football League Management System v2
         </p>
       </div>
     </div>
