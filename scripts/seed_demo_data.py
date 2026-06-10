@@ -23,12 +23,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
-
-try:
-    from datetime import UTC  # Python 3.11+
-except ImportError:
-    UTC = UTC  # type: ignore[assignment]
+from datetime import datetime, timedelta, timezone  # noqa: UP035
 
 # ---------------------------------------------------------------------------
 # Demo data definitions
@@ -203,7 +198,7 @@ def seed(api_base: str, email: str, password: str, dry_run: bool) -> None:
     print("  Login OK")
 
     # -- Season --------------------------------------------------------------
-    now = datetime.now(tz=UTC)
+    now = datetime.now(tz=timezone.utc)  # noqa: UP017
     season_payload = {
         "name": f"Premier League {now.year}",
         "year": now.year,
