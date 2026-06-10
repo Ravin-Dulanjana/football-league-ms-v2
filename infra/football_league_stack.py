@@ -489,10 +489,13 @@ class FootballLeagueStack(Stack):
             access_token_validity=Duration.hours(1),
             id_token_validity=Duration.hours(1),
             refresh_token_validity=Duration.days(30),
-            # Prevent client from writing custom attributes (read-only for client)
-            read_attributes=cognito.ClientAttributes().with_standard_attributes(
-                email=True
-            ),
+            # Client can read email + custom role/club/player — these appear in the
+            # ID token so FastAPI can extract them without an extra Cognito API call.
+            # Write access is intentionally omitted so clients cannot tamper with
+            # their own role or club assignment.
+            read_attributes=cognito.ClientAttributes()
+            .with_standard_attributes(email=True)
+            .with_custom_attributes("role", "club_id", "player_id"),
         )
 
         # JWKS URL — FastAPI uses this to fetch RSA public keys for JWT verification.
