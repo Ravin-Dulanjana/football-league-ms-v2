@@ -88,7 +88,6 @@ function AdminDashboard() {
         <p className="text-sm text-muted-foreground mt-1">League overview</p>
       </div>
 
-      {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Total clubs"
@@ -120,9 +119,7 @@ function AdminDashboard() {
         />
       </div>
 
-      {/* Pending action items */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Open registration requests */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-sm font-semibold">Registration requests</CardTitle>
@@ -158,7 +155,6 @@ function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* Open release requests */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-sm font-semibold">Release requests</CardTitle>
@@ -392,10 +388,10 @@ function PendingDecisionsList({
 }
 
 // ---------------------------------------------------------------------------
-// Root page — role switch
+// Root export — role switch
 // ---------------------------------------------------------------------------
 
-export default function DashboardPage() {
+export function DashboardHome() {
   const { role, isLoading } = useCurrentUser();
 
   if (isLoading) {

@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  // output: 'standalone' lets us deploy to EC2 as a plain Node.js process
-  // later with zero config changes. Vercel ignores this setting and works fine.
-  output: "standalone",
 
+const nextConfig = {
   // Never hardcode the backend URL here — use environment variables only.
   // The proxy in app/api/**/route.ts reads process.env.API_BASE_URL at runtime.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,7 +47,13 @@ type ForcePasswordForm = z.infer<typeof forcePasswordSchema>;
 
 type Step = "login" | "otp" | "force_password";
 
-export default function LoginPage() {
+// ---------------------------------------------------------------------------
+// LoginContent uses useSearchParams() — must be wrapped in <Suspense>.
+// Next.js 14 requires this because useSearchParams() causes a CSR bailout
+// during static-page generation. The outer LoginPage provides the boundary.
+// ---------------------------------------------------------------------------
+
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("from") ?? "/dashboard";
@@ -310,5 +316,14 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// Suspense boundary required by Next.js 14 for any page that uses useSearchParams().
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
   );
 }
