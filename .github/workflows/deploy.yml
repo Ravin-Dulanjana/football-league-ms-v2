@@ -91,6 +91,12 @@ jobs:
           # before gunicorn is restarted with broken code.
           script: |
             set -e
+
+            # Git 2.35+ refuses to run in repos owned by a different user.
+            # /opt/football-league was created by root (initial setup) but
+            # the SSH session runs as ec2-user, triggering the check.
+            git config --global --add safe.directory /opt/football-league
+
             cd /opt/football-league
 
             echo "=== Pulling latest code ==="
