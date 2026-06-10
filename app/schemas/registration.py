@@ -31,7 +31,7 @@ class RegistrationRequestRead(BaseModel):
 
 
 class RegistrationDecide(BaseModel):
-    decision: Literal["accept", "reject"]
+    decision: Literal["accept"]
 
 
 class PlayerSeasonRegistrationRead(BaseModel):

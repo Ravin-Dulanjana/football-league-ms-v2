@@ -71,6 +71,28 @@ def create_request(
     if existing is not None:
         return None, "Player already has a registration in this season."
 
+    # Cap: at most 30 players per club per season (pending + accepted combined)
+    from app.models.registration import RegistrationRequestStatus  # noqa: PLC0415
+
+    squad_count = (
+        db.execute(
+            select(RegistrationRequest).where(
+                RegistrationRequest.club_id == data.club_id,
+                RegistrationRequest.season_id == data.season_id,
+                RegistrationRequest.status.in_(
+                    [
+                        RegistrationRequestStatus.PENDING_PLAYER_CONFIRMATION,
+                        RegistrationRequestStatus.ACCEPTED,
+                    ]
+                ),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(squad_count) >= 30:
+        return None, "Maximum of 30 players per club per season already reached."
+
     req = RegistrationRequest(
         season_id=data.season_id,
         club_id=data.club_id,
@@ -143,47 +165,13 @@ def decide_request(
             "request_id": request_id_var.get(),
         }
     )
-    admin_roles = {"super_admin", "league_admin"}
-    if current_user.role not in admin_roles and current_user.player_id != req.player_id:
-        return None, "Only the requested player can decide on their own registration."
+    if current_user.player_id != req.player_id:
+        return None, "Only the requested player can acknowledge their own registration."
 
     if req.status != RegistrationRequestStatus.PENDING_PLAYER_CONFIRMATION:
         return None, "This request has already been processed."
 
     now = datetime.now(tz=UTC)
-
-    if decision == "reject":
-        req.status = RegistrationRequestStatus.REJECTED
-        req.responded_at = now
-        db.flush()
-        audit_service.write_audit_log(
-            db,
-            actor_id=current_user.id,
-            action="registration_request.reject",
-            entity_type="RegistrationRequest",
-            entity_id=req.id,
-        )
-        db.commit()
-        db.refresh(req)
-        logger.info(
-            {
-                "event": "decide_registration_request.complete",
-                "request_id_db": req.id,
-                "outcome": "rejected",
-                "request_id": request_id_var.get(),
-            }
-        )
-        publish_event(
-            "registration.rejected",
-            {
-                "registration_request_id": req.id,
-                "player_name": req.player.full_name,
-                "club_name": req.club.name,
-                "season_name": req.season.name,
-                "recipient_email": req.club.email,
-            },
-        )
-        return req, None
 
     # accept — create registration atomically
     req.status = RegistrationRequestStatus.ACCEPTED
