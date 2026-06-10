@@ -870,13 +870,26 @@ class FootballLeagueStack(Stack):
             instance.node.add_dependency(db_instance)  # type: ignore[possibly-undefined]
 
         # ---------------------------------------------------------------
+        # 8b. Elastic IP — gives the EC2 a static public IP that survives
+        # stop/start cycles. Without this, the IP changes every restart,
+        # breaking the EC2_HOST secret in GitHub Actions.
+        # ---------------------------------------------------------------
+        eip = ec2.CfnEIP(self, "EC2ElasticIP")
+        ec2.CfnEIPAssociation(
+            self,
+            "EC2EIPAssociation",
+            instance_id=instance.instance_id,
+            eip=eip.ref,
+        )
+
+        # ---------------------------------------------------------------
         # 9. Stack Outputs
         # ---------------------------------------------------------------
         CfnOutput(
             self,
             "EC2PublicIP",
-            value=instance.instance_public_ip,
-            description="EC2 public IP - test: curl http://<ip>/clubs/",
+            value=eip.ref,
+            description="EC2 Elastic IP (static) — update EC2_HOST secret after deploy",
         )
         CfnOutput(
             self,
