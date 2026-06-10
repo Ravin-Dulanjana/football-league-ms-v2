@@ -76,20 +76,23 @@ def create_user(
 
     Returns (user, error_message).
     """
-    # league_admin can only create club_admin accounts
-    if current_user.role == "league_admin" and data.role != "club_admin":
-        return (
-            None,
-            "League admins can only create club_admin accounts. "
-            "Contact a super_admin to create league_admin or super_admin accounts.",
-        )
+    # Enforce creation hierarchy:
+    #   super_admin  → any role
+    #   league_admin → league_admin, club_admin, player (not super_admin)
+    #   club_admin   → player only
+    role = current_user.role
+    target_role = data.role
+    if role == "league_admin" and target_role == "super_admin":
+        return None, "League admins cannot create super_admin accounts."
+    if role == "club_admin" and target_role != "player":
+        return None, "Club admins can only create player accounts."
 
     # club_admin role requires a club_id
-    if data.role == "club_admin" and not data.club_id:
+    if target_role == "club_admin" and not data.club_id:
         return None, "club_id is required when creating a club_admin account."
 
     # player role requires a player_id
-    if data.role == "player" and not data.player_id:
+    if target_role == "player" and not data.player_id:
         return None, "player_id is required when creating a player account."
 
     # Check email is not already taken
@@ -167,6 +170,12 @@ def soft_delete_user(
         return None, "This user has already been deleted."
     if not reason.strip():
         return None, "A reason is required for deletion."
+    # league_admin can only soft-delete player accounts
+    if current_user.role == "league_admin" and target.role != "player":
+        return None, "League admins can only delete player accounts."
+    # nobody can delete a super_admin
+    if target.role == "super_admin":
+        return None, "Super admin accounts cannot be deleted."
 
     now = datetime.now(tz=UTC)
     target.is_deleted = True

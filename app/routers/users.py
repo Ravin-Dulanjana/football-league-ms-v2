@@ -15,7 +15,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.dependencies import CurrentUser
-from app.dependencies.roles import require_league_admin_or_above, require_super_admin
+from app.dependencies.roles import (
+    require_any_admin,
+    require_league_admin_or_above,
+)
 from app.models.user import User
 from app.schemas.user import (
     AccountActionRequest,
@@ -45,7 +48,7 @@ def list_users(
 def create_user(
     data: UserCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_league_admin_or_above),
+    current_user: CurrentUser = Depends(require_any_admin),
 ) -> User:
     user, error = user_service.create_user(db, data, current_user)
     if error:
@@ -80,14 +83,19 @@ def soft_delete_user(
     user_id: int,
     body: SoftDeleteRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_super_admin),
+    current_user: CurrentUser = Depends(require_league_admin_or_above),
 ) -> None:
     target = user_service.get_user_by_id(db, user_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     _, error = user_service.soft_delete_user(db, target, current_user, body.reason)
     if error:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, error)
+        code = (
+            status.HTTP_403_FORBIDDEN
+            if "cannot" in error.lower() or "only" in error.lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(code, error)
 
 
 @router.post("/{user_id}/account-action/", response_model=UserRead)

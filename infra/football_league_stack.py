@@ -502,6 +502,21 @@ class FootballLeagueStack(Stack):
             f"/{user_pool.user_pool_id}/.well-known/jwks.json"
         )
 
+        # EC2 needs Cognito admin permissions to create/manage users via boto3.
+        # Scoped to this User Pool only — not resources=["*"].
+        instance_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="CognitoAdminUserManagement",
+                actions=[
+                    "cognito-idp:AdminCreateUser",
+                    "cognito-idp:AdminSetUserPassword",
+                    "cognito-idp:AdminGetUser",
+                    "cognito-idp:AdminUpdateUserAttributes",
+                ],
+                resources=[user_pool.user_pool_arn],
+            )
+        )
+
         # ---------------------------------------------------------------
         # Phase 7b. CloudWatch Alarms
         #
