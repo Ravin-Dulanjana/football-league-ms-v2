@@ -19,12 +19,12 @@ import {
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:8000";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const body = await req.json();
+  const credentials = await req.json();
 
   const upstream = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(credentials),
   });
 
   if (!upstream.ok) {
@@ -32,14 +32,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(error, { status: upstream.status });
   }
 
-  const tokens = await upstream.json();
+  const body = await upstream.json();
 
-  // Set httpOnly cookies — JS on the page can NEVER read these
+  // Cognito NEW_PASSWORD_REQUIRED — pass the challenge info to the client so
+  // the login form can show the "Set new password" step. No cookies are set yet.
+  if (body?.challenge === "NEW_PASSWORD_REQUIRED") {
+    return NextResponse.json(body);
+  }
+
+  // Normal success — set httpOnly cookies. JS on the page can NEVER read these.
   const res = NextResponse.json({ ok: true });
 
-  res.headers.append("Set-Cookie", buildIdTokenCookie(tokens.id_token));
-  if (tokens.refresh_token) {
-    res.headers.append("Set-Cookie", buildRefreshTokenCookie(tokens.refresh_token));
+  res.headers.append("Set-Cookie", buildIdTokenCookie(body.id_token));
+  if (body.refresh_token) {
+    res.headers.append("Set-Cookie", buildRefreshTokenCookie(body.refresh_token));
   }
 
   return res;
