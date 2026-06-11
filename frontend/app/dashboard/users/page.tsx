@@ -76,19 +76,11 @@ function makeCreateSchema(creatorIsClubAdmin: boolean) {
       account_type: z.enum(["player", "club_staff", "account"] as const),
       club_id: z.number().optional(),
       temporary_password: z.string().min(8, "At least 8 characters"),
-      full_name: z.string().optional(),
-      date_of_birth: z.string().optional(),
-      nic_number: z.string().optional(),
+      full_name: z.string().min(1, "Required"),
+      date_of_birth: z.string().min(1, "Required"),
+      nic_number: z.string().min(1, "Required"),
     })
     .superRefine((val, ctx) => {
-      if (val.account_type === "player") {
-        if (!val.full_name?.trim())
-          ctx.addIssue({ code: "custom", path: ["full_name"], message: "Required" });
-        if (!val.date_of_birth)
-          ctx.addIssue({ code: "custom", path: ["date_of_birth"], message: "Required" });
-        if (!val.nic_number?.trim())
-          ctx.addIssue({ code: "custom", path: ["nic_number"], message: "Required" });
-      }
       // League/super admin creating club_staff must pick a club.
       // Club admins skip the picker — their club is auto-assigned server-side.
       if (val.account_type === "club_staff" && !creatorIsClubAdmin && !val.club_id) {
@@ -170,11 +162,9 @@ function CreateUserDialog({
           ? data.club_id
           : undefined,
         temporary_password: data.temporary_password,
-        ...(data.account_type === "player" && {
-          full_name: data.full_name,
-          date_of_birth: data.date_of_birth,
-          nic_number: data.nic_number,
-        }),
+        full_name: data.full_name,
+        date_of_birth: data.date_of_birth,
+        nic_number: data.nic_number,
       });
     },
     onSuccess: () => {
@@ -262,46 +252,42 @@ function CreateUserDialog({
             </div>
           )}
 
-          {/* Player profile fields */}
-          {accountType === "player" && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="full_name">Full name *</Label>
-                <Input
-                  id="full_name"
-                  {...form.register("full_name")}
-                  placeholder="e.g. Kamal Perera"
-                />
-                {form.formState.errors.full_name && (
-                  <p className="text-xs text-destructive">
-                    {form.formState.errors.full_name.message}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="date_of_birth">Date of birth *</Label>
-                <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
-                {form.formState.errors.date_of_birth && (
-                  <p className="text-xs text-destructive">
-                    {form.formState.errors.date_of_birth.message}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="nic_number">NIC number *</Label>
-                <Input
-                  id="nic_number"
-                  {...form.register("nic_number")}
-                  placeholder="e.g. 901234567V"
-                />
-                {form.formState.errors.nic_number && (
-                  <p className="text-xs text-destructive">
-                    {form.formState.errors.nic_number.message}
-                  </p>
-                )}
-              </div>
-            </>
-          )}
+          {/* Personal details — required for all account types */}
+          <div className="space-y-1.5">
+            <Label htmlFor="full_name">Full name *</Label>
+            <Input
+              id="full_name"
+              {...form.register("full_name")}
+              placeholder="e.g. Kamal Perera"
+            />
+            {form.formState.errors.full_name && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.full_name.message}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="date_of_birth">Date of birth *</Label>
+            <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
+            {form.formState.errors.date_of_birth && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.date_of_birth.message}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="nic_number">NIC number *</Label>
+            <Input
+              id="nic_number"
+              {...form.register("nic_number")}
+              placeholder="e.g. 901234567V"
+            />
+            {form.formState.errors.nic_number && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.nic_number.message}
+              </p>
+            )}
+          </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="tmp-pw">Temporary password *</Label>
