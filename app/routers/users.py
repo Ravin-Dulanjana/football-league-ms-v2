@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies import CurrentUser
+from app.dependencies import CurrentUser, get_current_user
 from app.dependencies.roles import (
     require_any_admin,
     require_league_admin_or_above,
@@ -39,9 +39,9 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("/me/", response_model=UserRead)
 def get_me(
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_any_admin),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> User:
-    """Return the currently authenticated user's own record."""
+    """Return the currently authenticated user's own record (all roles)."""
     user = user_service.get_user_by_id(db, current_user.id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")

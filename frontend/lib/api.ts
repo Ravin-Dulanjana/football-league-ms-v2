@@ -195,6 +195,11 @@ export const playersApi = {
     apiFetch<UploadUrlResponse>(
       `/players/${playerId}/photo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`
     ),
+  // Self-service: upload my own profile photo
+  myPhotoUploadUrl: (filename: string, contentType = "image/jpeg") =>
+    apiFetch<UploadUrlResponse>(
+      `/players/me/photo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`
+    ),
 };
 
 // ---------------------------------------------------------------------------

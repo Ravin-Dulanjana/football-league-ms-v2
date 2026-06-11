@@ -12,12 +12,12 @@ import {
 } from "lucide-react";
 
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { reportsApi, registrationsApi, releasesApi } from "@/lib/api";
+import { clubsApi, reportsApi, registrationsApi, releasesApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { formatRelative } from "@/lib/utils";
-import type { AnalyticsSummary, RegistrationRequestRead, ReleaseRead } from "@/types";
+import type { AnalyticsSummary, ClubRead, RegistrationRequestRead, ReleaseRead } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Stat card
@@ -51,6 +51,56 @@ function StatCard({
           )}
         </CardContent>
       </Card>
+    </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Club banner — shown at top for any user who belongs to a club
+// ---------------------------------------------------------------------------
+
+function ClubBanner({ clubId }: { clubId: number }) {
+  const { data: club, isLoading } = useQuery<ClubRead>({
+    queryKey: ["club", clubId],
+    queryFn: () => clubsApi.get(clubId),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card">
+        <Skeleton className="w-10 h-10 rounded-lg" />
+        <div className="space-y-1.5">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      </div>
+    );
+  }
+  if (!club) return null;
+
+  return (
+    <Link
+      href={`/dashboard/clubs/${club.id}`}
+      className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-muted/50 transition-colors"
+    >
+      <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary font-bold flex items-center justify-center text-xs shrink-0 overflow-hidden">
+        {club.logo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={club.logo_url} alt={club.name} className="w-full h-full object-cover" />
+        ) : (
+          <Building2 className="h-5 w-5" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold truncate">{club.name}</p>
+        <p className="text-xs text-muted-foreground">
+          {club.short_name ?? club.code}
+          {club.established_year ? ` · Est. ${club.established_year}` : ""}
+        </p>
+      </div>
+      <StatusBadge status={club.status} />
+      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
     </Link>
   );
 }
@@ -199,6 +249,8 @@ function AdminDashboard() {
 // ---------------------------------------------------------------------------
 
 function ClubAdminDashboard() {
+  const { user } = useCurrentUser();
+
   const { data: regs, isLoading: regsLoading } = useQuery<RegistrationRequestRead[]>({
     queryKey: ["registrations"],
     queryFn: registrationsApi.list,
@@ -222,6 +274,8 @@ function ClubAdminDashboard() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">Pending actions for your club</p>
       </div>
+
+      {user?.club_id && <ClubBanner clubId={user.club_id} />}
 
       <div className="grid grid-cols-2 gap-4">
         <StatCard
@@ -254,6 +308,8 @@ function ClubAdminDashboard() {
 // ---------------------------------------------------------------------------
 
 function PlayerDashboard() {
+  const { user } = useCurrentUser();
+
   const { data: regs, isLoading: regsLoading } = useQuery<RegistrationRequestRead[]>({
     queryKey: ["registrations"],
     queryFn: registrationsApi.list,
@@ -277,6 +333,8 @@ function PlayerDashboard() {
         <h1 className="text-2xl font-semibold">My Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">Decisions waiting for you</p>
       </div>
+
+      {user?.club_id && <ClubBanner clubId={user.club_id} />}
 
       <PendingDecisionsList
         registrations={pendingRegs}
