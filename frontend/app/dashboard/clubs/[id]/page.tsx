@@ -382,11 +382,15 @@ export default function ClubDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteStaffTarget, setDeleteStaffTarget] = useState<ClubStaffRead | null>(null);
   const queryClient = useQueryClient();
-  const { user, isClubAdmin, isLeagueLevel } = useCurrentUser();
+  const { user, isSuperAdmin } = useCurrentUser();
 
-  // Is this the club admin of THIS specific club?
-  const isOwnClubAdmin = isClubAdmin && user?.club_id === clubId;
-  const canEdit = isOwnClubAdmin || isLeagueLevel;
+  // A user can edit this club only if they have a club_admin governance role
+  // for this specific club. League admin alone does NOT grant club editing rights.
+  // Super admin can always edit.
+  const isOwnClubAdmin = (user?.governance_roles ?? []).some(
+    (gr) => gr.role === "club_admin" && gr.club_id === clubId
+  );
+  const canEdit = isOwnClubAdmin || isSuperAdmin;
 
   const { data: club, isLoading: clubLoading } = useQuery<ClubRead>({
     queryKey: ["club", clubId],
