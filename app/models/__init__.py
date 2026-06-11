@@ -8,6 +8,7 @@ from app.models.club_season import (
     ClubUnlockRequest,
     UnlockApproval,
 )
+from app.models.league_info import LeagueInfo
 from app.models.notification import Notification, NotificationPreference
 from app.models.player import Player
 from app.models.registration import PlayerSeasonRegistration, RegistrationRequest
@@ -32,6 +33,7 @@ __all__ = [
     "PlayerSeasonRegistration",
     "PlayerRelease",
     "ReleaseDocument",
+    "LeagueInfo",
     "Season",
     "User",
     "UserGovernanceRole",

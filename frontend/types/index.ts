@@ -93,9 +93,14 @@ export interface ClubRead {
   short_name: string | null;
   code: string;
   email: string | null;
+  phone_number: string | null;
   logo_key: string | null;
   logo_url: string | null;
   status: ClubStatus;
+  established_year: number | null;
+  president_name: string | null;
+  secretary_name: string | null;
+  treasurer_name: string | null;
   created_at: string;
 }
 
@@ -104,6 +109,11 @@ export interface ClubCreate {
   short_name?: string;
   code: string;
   email?: string;
+  phone_number?: string;
+  established_year?: number;
+  president_name?: string;
+  secretary_name?: string;
+  treasurer_name?: string;
   logo_key?: string;
 }
 
@@ -112,8 +122,42 @@ export interface ClubUpdate {
   short_name?: string;
   code?: string;
   email?: string;
+  phone_number?: string;
   logo_key?: string;
   status?: ClubStatus;
+  established_year?: number | null;
+  president_name?: string | null;
+  secretary_name?: string | null;
+  treasurer_name?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// League Info
+// ---------------------------------------------------------------------------
+
+export interface LeagueInfoRead {
+  id: number;
+  league_name: string;
+  founded_year: number | null;
+  president_name: string | null;
+  secretary_name: string | null;
+  treasurer_name: string | null;
+  email: string | null;
+  phone_number: string | null;
+  logo_key: string | null;
+  logo_url: string | null;
+  updated_at: string;
+}
+
+export interface LeagueInfoUpdate {
+  league_name?: string;
+  founded_year?: number | null;
+  president_name?: string | null;
+  secretary_name?: string | null;
+  treasurer_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  logo_key?: string | null;
 }
 
 export interface UploadUrlResponse {

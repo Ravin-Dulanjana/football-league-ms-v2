@@ -11,6 +11,7 @@ import {
   ClipboardList,
   FileText,
   Home,
+  Info,
   Key,
   ListChecks,
   LogOut,
@@ -18,6 +19,7 @@ import {
   Shield,
   Shirt,
   Users,
+  UserCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -40,6 +42,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: Home },
+  { label: "My Profile", href: "/dashboard/profile", icon: UserCircle },
   { label: "Clubs", href: "/dashboard/clubs", icon: Building2 },
   { label: "Players", href: "/dashboard/players", icon: Shirt },
   { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
@@ -87,6 +90,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Audit Logs",
     href: "/dashboard/audit-logs",
     icon: Shield,
+    roles: ["super_admin", "league_admin"],
+  },
+  {
+    label: "League Info",
+    href: "/dashboard/league-info",
+    icon: Info,
     roles: ["super_admin", "league_admin"],
   },
   {
