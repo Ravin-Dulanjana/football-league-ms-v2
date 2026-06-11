@@ -6,7 +6,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronRight, Lock, Pencil, Plus, ScrollText, Trash2 } from "lucide-react";
+import { AlertTriangle, Lock, Pencil, Plus, ScrollText, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {

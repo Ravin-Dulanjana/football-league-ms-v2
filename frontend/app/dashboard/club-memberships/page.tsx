@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, Users, UserMinus, UserPlus, X } from "lucide-react";
+import { Users, UserMinus, UserPlus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
