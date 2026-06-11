@@ -16,9 +16,9 @@ router = APIRouter(prefix="/releases", tags=["releases"])
 @router.get("/", response_model=list[ReleaseRead])
 def list_releases(
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> list[PlayerRelease]:
-    return release_service.get_all_releases(db)
+    return release_service.get_all_releases(db, current_user)
 
 
 @router.post(

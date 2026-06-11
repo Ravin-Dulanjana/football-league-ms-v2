@@ -20,9 +20,23 @@ from app.services.events import publish_event
 logger = get_logger(__name__)
 
 
-def get_all_releases(db: Session) -> list[PlayerRelease]:
-    result = db.execute(select(PlayerRelease).order_by(PlayerRelease.id.desc()))
-    return list(result.scalars().all())
+def get_all_releases(
+    db: Session,
+    current_user: CurrentUser | None = None,
+) -> list[PlayerRelease]:
+    """
+    Return releases scoped by caller role:
+      club_admin  — only releases from their club (from_club_id)
+      player      — only releases for their own player_id
+      all others  — everything
+    """
+    q = select(PlayerRelease).order_by(PlayerRelease.id.desc())
+    if current_user is not None:
+        if current_user.role == "club_admin" and current_user.club_id:
+            q = q.where(PlayerRelease.from_club_id == current_user.club_id)
+        elif current_user.role == "player" and current_user.player_id:
+            q = q.where(PlayerRelease.player_id == current_user.player_id)
+    return list(db.execute(q).scalars().all())
 
 
 def get_release_by_id(db: Session, release_id: int) -> PlayerRelease | None:

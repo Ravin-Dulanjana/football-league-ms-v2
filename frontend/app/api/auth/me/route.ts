@@ -2,17 +2,13 @@
 // GET /api/auth/me
 //
 // Called on every dashboard load (from useCurrentUser hook via React Query).
-// Reads the id_token cookie, verifies it's present, and proxies to the
-// FastAPI /auth/me (or reconstructs user from token claims if no /me endpoint).
+// Reads the id_token cookie, verifies it's present (and not expired), then
+// proxies to GET /users/me/ on the FastAPI backend to get the full DB user
+// record — including governance_roles, member_type, and the real DB id.
 //
-// Currently the FastAPI backend does not have a dedicated /me endpoint —
-// user info is contained in the JWT claims and synced to DB on each request.
-// We proxy to /users/ and return the first match, OR we decode the JWT
-// locally to get basic role/id info.
-//
-// Simple approach: the first authenticated call returns a 401 if token invalid.
-// We use the /notifications/ endpoint as a lightweight "am I authenticated?" check,
-// and return user data from the token claims decoded on the server.
+// This replaces the old approach that only called the backend for
+// super_admin/league_admin and fell back to JWT claims (returning id: null)
+// for every other role, which broke club-edit gating and profile pages.
 // ---------------------------------------------------------------------------
 
 import { cookies } from "next/headers";
@@ -41,7 +37,7 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 
-  // Check if the token has expired (exp claim is in seconds since epoch).
+  // Quick client-side expiry check (no network round-trip).
   const claims = decodeJwtPayload(idToken);
   if (!claims) {
     return NextResponse.json({ detail: "Invalid token" }, { status: 401 });
@@ -52,13 +48,27 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json({ detail: "Token expired" }, { status: 401 });
   }
 
-  // Make a lightweight call to the backend to get the DB user record.
-  // GET /users/ is only available to admins. For players, we fall back
-  // to the JWT claims which contain enough info for the UI.
-  //
-  // Better approach: the backend should expose GET /auth/me — but since it
-  // doesn't, we reconstruct from claims + a conditional call.
+  // Fetch the full DB user record from GET /users/me/.
+  // This endpoint is accessible to ALL authenticated users and returns the
+  // real DB id, governance_roles, member_type, last_login_at, etc.
+  const res = await fetch(`${API_BASE}/users/me/`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  }).catch(() => null);
 
+  if (res?.ok) {
+    const me = await res.json();
+    return NextResponse.json(me);
+  }
+
+  // If the backend is unreachable, fall back to JWT claims so the UI
+  // doesn't fully break — but surface the real status code if the backend
+  // returned one (e.g. 401 means the token was rejected by the backend).
+  if (res && res.status === 401) {
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
+  // Generic fallback: reconstruct from claims.
+  // id is null here because we couldn't reach the DB — callers must handle this.
   const role = claims["custom:role"] as string | undefined;
   const clubId = claims["custom:club_id"]
     ? Number(claims["custom:club_id"])
@@ -67,36 +77,8 @@ export async function GET(): Promise<NextResponse> {
     ? Number(claims["custom:player_id"])
     : null;
 
-  // Try to fetch the full DB user record for admins (has /users/ access).
-  // For players, the JWT claims are sufficient for auth/routing.
-  if (role === "super_admin" || role === "league_admin") {
-    const upstream = await fetch(`${API_BASE}/users/?include_deleted=false`, {
-      headers: { Authorization: `Bearer ${idToken}` },
-    }).catch(() => null);
-
-    if (upstream?.ok) {
-      const users = (await upstream.json()) as Array<{
-        id: number;
-        email: string;
-        role: string;
-        is_active: boolean;
-        is_deleted: boolean;
-        force_password_change: boolean;
-        last_login_at: string | null;
-        created_at: string;
-        club_id: number | null;
-        player_id: number | null;
-      }>;
-      const email = claims.email as string;
-      const me = users.find((u) => u.email === email);
-      if (me) return NextResponse.json(me);
-    }
-  }
-
-  // Fallback: build a minimal user object from JWT claims.
-  // This is sufficient for routing and role-based rendering.
   return NextResponse.json({
-    id: null, // not known without a DB call
+    id: null,
     email: claims.email as string,
     role: role ?? "player",
     club_id: clubId,
@@ -106,5 +88,6 @@ export async function GET(): Promise<NextResponse> {
     force_password_change: false,
     last_login_at: null,
     created_at: new Date(Number(claims.iat) * 1000).toISOString(),
+    governance_roles: [],
   });
 }

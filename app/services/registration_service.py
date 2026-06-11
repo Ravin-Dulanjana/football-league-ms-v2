@@ -22,11 +22,23 @@ from app.services.events import publish_event
 logger = get_logger(__name__)
 
 
-def get_all_requests(db: Session) -> list[RegistrationRequest]:
-    result = db.execute(
-        select(RegistrationRequest).order_by(RegistrationRequest.id.desc())
-    )
-    return list(result.scalars().all())
+def get_all_requests(
+    db: Session,
+    current_user: CurrentUser | None = None,
+) -> list[RegistrationRequest]:
+    """
+    Return registration requests scoped by caller role:
+      club_admin  — only their club's requests
+      player      — only requests for their own player_id
+      all others  — everything
+    """
+    q = select(RegistrationRequest).order_by(RegistrationRequest.id.desc())
+    if current_user is not None:
+        if current_user.role == "club_admin" and current_user.club_id:
+            q = q.where(RegistrationRequest.club_id == current_user.club_id)
+        elif current_user.role == "player" and current_user.player_id:
+            q = q.where(RegistrationRequest.player_id == current_user.player_id)
+    return list(db.execute(q).scalars().all())
 
 
 def get_request_by_id(db: Session, request_id: int) -> RegistrationRequest | None:
