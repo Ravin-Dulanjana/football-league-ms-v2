@@ -103,23 +103,27 @@ def create_user(
     if existing:
         return None, "A user with that email already exists."
 
-    # A player profile is created when:
-    #   a) the role is player (mandatory), or
-    #   b) personal details are supplied for any account type — every person
-    #      in the league is registered as an identity even if they are staff
-    #      or an unplaced account.
+    # Derive member_type: reflects the person's fundamental identity.
+    # Use the explicit value if provided; otherwise infer from role.
+    #   "player"     — a footballer; full registration eligibility
+    #   "club_staff" — club support (coach, physio, secretary, etc.)
+    #   "user"       — unplaced / no specific club identity yet
+    member_type = data.member_type
+    if member_type is None:
+        if target_role == "player":
+            member_type = "player"
+        elif target_role == "club_staff":
+            member_type = "club_staff"
+        else:
+            member_type = "user"
+
+    # Create an identity record (player profile) whenever personal details are
+    # provided, regardless of account type.  For member_type="player" this is
+    # a full footballer profile; for club_staff/user it is identity-only.
     has_personal_details = bool(
         data.full_name and data.date_of_birth and data.nic_number
     )
-    create_player_profile = target_role == "player" or has_personal_details
-
-    # Derive member_type: if a player profile is being created the person has
-    # a footballer identity; otherwise infer from role for base roles.
-    member_type = data.member_type
-    if create_player_profile:
-        member_type = "player"
-    elif member_type is None and target_role == "club_staff":
-        member_type = "club_staff"
+    create_player_profile = has_personal_details
 
     player_id: int | None = None
     new_player: Player | None = None
