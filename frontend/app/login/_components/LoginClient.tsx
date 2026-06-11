@@ -48,6 +48,13 @@ type ForcePasswordForm = z.infer<typeof forcePasswordSchema>;
 
 type Step = "login" | "otp" | "force_password";
 
+// Held in state when Cognito returns NEW_PASSWORD_REQUIRED so we can complete
+// the challenge in the next step.
+interface ChallengeState {
+  email: string;
+  session: string;
+}
+
 // ---------------------------------------------------------------------------
 // LoginContent uses useSearchParams() — must be wrapped in <Suspense>.
 // Next.js 14 requires this because useSearchParams() causes a CSR bailout
@@ -62,6 +69,7 @@ function LoginContent() {
   const [step, setStep] = useState<Step>("login");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [challenge, setChallenge] = useState<ChallengeState | null>(null);
 
   // ---------------------------------------------------------------------------
   // Login form
@@ -93,8 +101,9 @@ function LoginContent() {
         return;
       }
 
-      // Check force_password_change flag embedded in response
-      if (body?.force_password_change) {
+      // Cognito NEW_PASSWORD_REQUIRED — store session and move to password-change step
+      if (body?.challenge === "NEW_PASSWORD_REQUIRED") {
+        setChallenge({ email: data.email, session: body.session });
         setStep("force_password");
         return;
       }
@@ -136,11 +145,43 @@ function LoginContent() {
   });
 
   const onForcePassword = async (data: ForcePasswordForm) => {
+    if (!challenge) {
+      toast.error("Session lost — please sign in again.");
+      setStep("login");
+      return;
+    }
     setLoading(true);
-    // TODO: wire to backend when Cognito new-password challenge is implemented.
-    toast.info("Password change — backend endpoint not yet wired");
-    setLoading(false);
-    void data;
+    try {
+      const res = await fetch("/api/auth/complete-challenge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: challenge.email,
+          new_password: data.new_password,
+          session: challenge.session,
+        }),
+      });
+
+      const body = await res.json();
+
+      if (!res.ok) {
+        toast.error(body?.detail ?? "Failed to set new password. Please try again.");
+        // If the session expired, restart from login
+        if (res.status === 401) {
+          setStep("login");
+          setChallenge(null);
+        }
+        return;
+      }
+
+      toast.success("Password updated — you're now signed in.");
+      router.push(redirectTo);
+      router.refresh();
+    } catch {
+      toast.error("Connection error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -170,7 +211,7 @@ function LoginContent() {
             <p className="text-sm text-muted-foreground">
               {step === "login" && "Sign in to your account"}
               {step === "otp" && "Enter your verification code"}
-              {step === "force_password" && "Set a new password to continue"}
+              {step === "force_password" && "Choose a new password to continue"}
             </p>
           </div>
         </div>
@@ -185,7 +226,7 @@ function LoginContent() {
             {(step === "otp" || step === "force_password") && (
               <CardDescription>
                 {step === "otp" && "We sent a code to your registered device"}
-                {step === "force_password" && "Your administrator has reset your password"}
+                {step === "force_password" && "Your account requires a new password before you can sign in"}
               </CardDescription>
             )}
           </CardHeader>

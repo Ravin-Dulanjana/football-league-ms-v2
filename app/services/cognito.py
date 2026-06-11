@@ -35,9 +35,11 @@ def _cognito_client() -> Any:
 
 def login(email: str, password: str) -> dict[str, Any]:
     """
-    Call Cognito USER_PASSWORD_AUTH and return the authentication result.
+    Call Cognito USER_PASSWORD_AUTH and return either tokens or a challenge dict.
 
-    Returns a dict with access_token, id_token, refresh_token, expires_in.
+    Normal success → tokens dict (access_token, id_token, refresh_token, …)
+    Challenge      → { challenge: "NEW_PASSWORD_REQUIRED", session, email }
+
     Raises 401 for bad credentials, 503 if Cognito is unreachable.
     """
     client = _cognito_client()
@@ -66,16 +68,15 @@ def login(email: str, password: str) -> dict[str, Any]:
             status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication service unavailable"
         ) from exc
 
-    # Cognito may return a challenge (e.g. NEW_PASSWORD_REQUIRED) instead of tokens
-    # when the account was created by an admin with a temporary password.
-    # Without this guard, resp["AuthenticationResult"] raises KeyError → 500.
-    if "ChallengeName" in resp:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            "A password reset is required for this account. "
-            "Ask your administrator to issue a password reset via the Users page.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Admin-created or admin-reset accounts come back as a challenge instead of tokens.
+    # Return the challenge info so the router can pass it to the frontend, which will
+    # call /auth/complete-challenge once the user enters their new password.
+    if resp.get("ChallengeName") == "NEW_PASSWORD_REQUIRED":
+        return {
+            "challenge": "NEW_PASSWORD_REQUIRED",
+            "session": resp["Session"],
+            "email": email,
+        }
 
     result = resp.get("AuthenticationResult")
     if not result:
@@ -89,6 +90,61 @@ def login(email: str, password: str) -> dict[str, Any]:
         "access_token": result["AccessToken"],
         "id_token": result["IdToken"],
         "refresh_token": result["RefreshToken"],
+        "expires_in": result["ExpiresIn"],
+        "token_type": "Bearer",
+    }
+
+
+def respond_new_password(email: str, new_password: str, session: str) -> dict[str, Any]:
+    """
+    Complete a NEW_PASSWORD_REQUIRED challenge via RespondToAuthChallenge.
+
+    Called when the user enters their new password after an admin-triggered reset.
+    Returns tokens on success.
+    """
+    client = _cognito_client()
+    try:
+        resp = client.respond_to_auth_challenge(
+            ClientId=settings.cognito_client_id,
+            ChallengeName="NEW_PASSWORD_REQUIRED",
+            Session=session,
+            ChallengeResponses={
+                "USERNAME": email,
+                "NEW_PASSWORD": new_password,
+            },
+        )
+    except ClientError as exc:
+        error_code = exc.response["Error"]["Code"]
+        if error_code in ("NotAuthorizedException", "ExpiredCodeException"):
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Session expired — please sign in again",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+        if error_code == "InvalidPasswordException":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Password does not meet the requirements "
+                "(min 8 chars, uppercase, lowercase, number, symbol)",
+            ) from exc
+        logger.exception("Unexpected Cognito error during new-password challenge")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Authentication service returned an unexpected error",
+        ) from exc
+
+    result = resp.get("AuthenticationResult")
+    if not result:
+        logger.error("Cognito challenge complete: no AuthenticationResult returned")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Challenge completed but no tokens returned",
+        )
+
+    return {
+        "access_token": result["AccessToken"],
+        "id_token": result["IdToken"],
+        "refresh_token": result.get("RefreshToken"),
         "expires_in": result["ExpiresIn"],
         "token_type": "Bearer",
     }
