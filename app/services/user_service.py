@@ -369,6 +369,35 @@ def restore_user(
 GOVERNANCE_ROLE_SET = frozenset({"super_admin", "league_admin", "club_admin"})
 
 
+def _check_role_permission(
+    caller: CurrentUser,
+    target_role: str,
+    target_club_id: int | None,
+) -> str | None:
+    """
+    Returns an error string if caller is not allowed to assign/revoke
+    target_role, or None if permitted.
+
+    Permission matrix:
+      super_admin  — any role
+      league_admin — league_admin or club_admin (any club)
+      club_admin   — club_admin for their own club only
+    """
+    if caller.role == "super_admin":
+        return None
+    if caller.role == "league_admin":
+        if target_role not in ("league_admin", "club_admin", "player", "club_staff"):
+            return f"League admins cannot manage the '{target_role}' role."
+        return None
+    if caller.role == "club_admin":
+        if target_role != "club_admin":
+            return "Club admins can only manage the club_admin role."
+        if target_club_id != caller.club_id:
+            return "Club admins can only manage club_admin roles for their own club."
+        return None
+    return "Insufficient permissions to manage roles."
+
+
 def assign_role(
     db: Session,
     target: User,
@@ -378,17 +407,17 @@ def assign_role(
     current_user: CurrentUser,
 ) -> tuple[User | None, str | None]:
     """
-    Add a governance role to a user (super_admin only).
+    Add a governance role to a user.
 
-    Roles are now ADDITIVE — assigning league_admin to a club_admin keeps
-    both.  The junction table records all active governance roles;
-    users.role stores the highest for JWT backwards-compatibility.
-
-    Assigning a base role (player / club_staff) clears all governance roles
-    and resets the user to their member_type identity (i.e. "step down").
+    Caller permissions: super_admin > league_admin > club_admin (own club only).
+    Roles are ADDITIVE — assigning league_admin to a club_admin keeps both.
+    Assigning a base role (player / club_staff) clears all governance roles.
     """
-    if target.role == "super_admin":
-        return None, "The super_admin role cannot be changed via this action."
+    perm_err = _check_role_permission(current_user, new_role, new_club_id)
+    if perm_err:
+        return None, perm_err
+    if target.role == "super_admin" and current_user.role != "super_admin":
+        return None, "Only a super_admin can change another super_admin's role."
     if new_role == "club_admin" and not new_club_id:
         return None, "club_id is required when assigning the club_admin role."
 
@@ -489,6 +518,76 @@ def assign_role(
             "new_club_id": new_club_id,
             "reason": reason,
         },
+    )
+    db.commit()
+    db.refresh(target)
+    attach_governance_roles(db, [target])
+    return target, None
+
+
+def revoke_governance_role(
+    db: Session,
+    target: User,
+    role: str,
+    club_id: int | None,
+    reason: str,
+    current_user: CurrentUser,
+) -> tuple[User | None, str | None]:
+    """
+    Remove one governance role entry from a user.
+
+    Caller permissions: same matrix as assign_role.
+    After removal, users.role is recomputed from remaining governance roles;
+    if none remain it falls back to the user's member_type.
+    """
+    perm_err = _check_role_permission(current_user, role, club_id)
+    if perm_err:
+        return None, perm_err
+
+    query = select(UserGovernanceRole).where(
+        UserGovernanceRole.user_id == target.id,
+        UserGovernanceRole.role == role,
+    )
+    if role == "club_admin" and club_id is not None:
+        query = query.where(UserGovernanceRole.club_id == club_id)
+
+    entry = db.execute(query).scalars().first()
+    if entry is None:
+        return None, f"User does not have the '{role}' governance role."
+
+    db.delete(entry)
+    db.flush()
+
+    # Recompute highest role from remaining governance roles
+    remaining = list(
+        db.execute(
+            select(UserGovernanceRole).where(UserGovernanceRole.user_id == target.id)
+        )
+        .scalars()
+        .all()
+    )
+
+    if remaining:
+        role_names = [r.role for r in remaining]
+        top_role = highest_role(role_names)
+        target.role = top_role
+        club_admin_entry = next((r for r in remaining if r.role == "club_admin"), None)
+        target.club_id = club_admin_entry.club_id if club_admin_entry else None
+    else:
+        # No governance roles left — fall back to member identity
+        target.role = target.member_type or "player"
+        target.club_id = None
+
+    _cognito_update_role(target.cognito_sub, target.role, target.club_id)
+
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="user.revoke_role",
+        entity_type="User",
+        entity_id=target.id,
+        details={"revoked_role": role, "club_id": club_id, "reason": reason},
     )
     db.commit()
     db.refresh(target)

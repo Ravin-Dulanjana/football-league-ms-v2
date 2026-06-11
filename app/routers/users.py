@@ -27,6 +27,7 @@ from app.models.user import User
 from app.schemas.user import (
     AccountActionRequest,
     AssignRoleRequest,
+    RevokeRoleRequest,
     SoftDeleteRequest,
     UserCreate,
     UserRead,
@@ -213,19 +214,18 @@ def assign_role(
     user_id: int,
     body: AssignRoleRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_super_admin),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> User:
     """
-    Assign or change a user's governance role (super_admin only).
+    Add a governance role to a user.
 
-    The user's member_type (player/club_staff) is preserved — this action only
-    changes the governance/access role, not the person's fundamental identity.
-
-    Example use cases:
-      - Player elected club president → assign club_admin (member_type stays "player")
-      - Club admin steps down → assign player or club_staff
-      - Player appointed league official → assign league_admin
+    Caller permissions:
+      super_admin  — any role, any user
+      league_admin — club_admin or league_admin, any club
+      club_admin   — club_admin only, for their own club
     """
+    if current_user.role not in ("super_admin", "league_admin", "club_admin"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied.")
     target = user_service.get_user_by_id(db, user_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
@@ -233,9 +233,43 @@ def assign_role(
         db, target, body.new_role, body.club_id, body.reason, current_user
     )
     if error:
+        _forbidden = ("permissions", "cannot", "only")
         code = (
             status.HTTP_403_FORBIDDEN
-            if "cannot" in error.lower()
+            if any(w in error.lower() for w in _forbidden)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(code, error)
+    return updated  # type: ignore[return-value]
+
+
+@router.post("/{user_id}/role/revoke/", response_model=UserRead)
+def revoke_role(
+    user_id: int,
+    body: RevokeRoleRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> User:
+    """
+    Remove one governance role from a user.
+
+    Caller permissions:
+      super_admin  — any role, any user
+      league_admin — club_admin or league_admin, any club
+      club_admin   — club_admin only, for their own club
+    """
+    if current_user.role not in ("super_admin", "league_admin", "club_admin"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied.")
+    target = user_service.get_user_by_id(db, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    updated, error = user_service.revoke_governance_role(
+        db, target, body.role, body.club_id, body.reason, current_user
+    )
+    if error:
+        code = (
+            status.HTTP_403_FORBIDDEN
+            if "permissions" in error.lower() or "only" in error.lower()
             else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(code, error)

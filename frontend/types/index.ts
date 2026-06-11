@@ -68,6 +68,12 @@ export interface AssignRoleRequest {
   reason: string;
 }
 
+export interface RevokeRoleRequest {
+  role: string;
+  club_id?: number | null;
+  reason: string;
+}
+
 export type AccountAction =
   | "activate"
   | "deactivate"

@@ -17,6 +17,7 @@ import type {
   AccountActionRequest,
   AnalyticsSummary,
   AssignRoleRequest,
+  RevokeRoleRequest,
   AuditLogRead,
   ClubCreate,
   ClubRead,
@@ -289,6 +290,11 @@ export const usersApi = {
   assignRole: (id: number, data: AssignRoleRequest) =>
     apiFetch<UserRead>(`/users/${id}/role/`, {
       method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  revokeRole: (id: number, data: RevokeRoleRequest) =>
+    apiFetch<UserRead>(`/users/${id}/role/revoke/`, {
+      method: "POST",
       body: JSON.stringify(data),
     }),
 };
