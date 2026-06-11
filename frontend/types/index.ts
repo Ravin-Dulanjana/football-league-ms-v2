@@ -220,6 +220,7 @@ export interface SeasonRead {
   registration_close_at: string;
   season_end_date: string | null;
   is_locked: boolean;
+  is_archived: boolean;
   status: SeasonStatus;
   created_at: string;
 }
@@ -237,7 +238,7 @@ export interface SeasonUpdate {
   registration_open_at?: string;
   registration_close_at?: string;
   season_end_date?: string | null;
-  status?: SeasonStatus;
+  is_archived?: boolean;
 }
 
 // ---------------------------------------------------------------------------

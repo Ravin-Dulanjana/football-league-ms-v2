@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm, Controller } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { AlertTriangle, Lock, Pencil, Plus, ScrollText, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, Lock, Pencil, Plus, ScrollText, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,13 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -52,7 +45,7 @@ import type { SeasonRead, SeasonStatus } from "@/types";
 const STATUS_ORDER: SeasonStatus[] = ["draft", "open", "active", "closed", "archived"];
 
 const STATUS_INFO: Record<SeasonStatus, { label: string; hint: string }> = {
-  draft: { label: "Draft", hint: "Not yet opened. Dates can still be changed." },
+  draft: { label: "Draft", hint: "Registration hasn't opened yet." },
   open: {
     label: "Open",
     hint: "Registration window is open. Clubs can register their players.",
@@ -149,7 +142,7 @@ function CreateSeasonDialog({
         </DialogHeader>
         <p className="text-sm text-muted-foreground -mt-2">
           Set three key dates: when clubs can start registering players, when registration closes,
-          and when the season roughly ends.
+          and when the season roughly ends. Status moves automatically as dates pass.
         </p>
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -229,7 +222,7 @@ function CreateSeasonDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Edit dialog
+// Edit dialog — dates only, status is automatic
 // ---------------------------------------------------------------------------
 
 const editSchema = z
@@ -238,7 +231,6 @@ const editSchema = z
     registration_open_at: z.string().min(1, "Required"),
     registration_close_at: z.string().min(1, "Required"),
     season_end_date: z.string().optional(),
-    status: z.enum(["draft", "open", "active", "closed", "archived"] as const),
   })
   .superRefine((val, ctx) => {
     if (val.registration_close_at && val.registration_open_at) {
@@ -263,15 +255,6 @@ const editSchema = z
 
 type EditForm = z.infer<typeof editSchema>;
 
-// Map status → allowed next statuses (mirrors backend VALID_TRANSITIONS)
-const NEXT_STATUSES: Record<SeasonStatus, SeasonStatus[]> = {
-  draft: ["draft", "open"],
-  open: ["open", "active"],
-  active: ["active", "closed"],
-  closed: ["closed", "archived"],
-  archived: ["archived"],
-};
-
 function EditSeasonDialog({
   season,
   onOpenChange,
@@ -288,11 +271,8 @@ function EditSeasonDialog({
       registration_open_at: season.registration_open_at.slice(0, 16),
       registration_close_at: season.registration_close_at.slice(0, 16),
       season_end_date: season.season_end_date ? season.season_end_date.slice(0, 16) : "",
-      status: season.status,
     },
   });
-
-  const allowedStatuses = NEXT_STATUSES[season.status];
 
   const mutation = useMutation({
     mutationFn: (data: EditForm) =>
@@ -301,7 +281,6 @@ function EditSeasonDialog({
         registration_open_at: data.registration_open_at,
         registration_close_at: data.registration_close_at,
         season_end_date: data.season_end_date || null,
-        status: data.status,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["seasons"] });
@@ -317,6 +296,11 @@ function EditSeasonDialog({
         <DialogHeader>
           <DialogTitle>Edit season — {season.name}</DialogTitle>
         </DialogHeader>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground -mt-1">
+          <span>Current status:</span>
+          <StatusBadge status={season.status} />
+          <span className="text-xs">(auto-computed from dates)</span>
+        </div>
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="space-y-1.5">
             <Label>Season name *</Label>
@@ -351,36 +335,6 @@ function EditSeasonDialog({
               </p>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label>Status</Label>
-            <Controller
-              control={form.control}
-              name="status"
-              render={({ field }) => (
-                <Select onValueChange={field.onChange} value={field.value}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allowedStatuses.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        <span className="capitalize">{STATUS_INFO[s].label}</span>
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          — {STATUS_INFO[s].hint}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-            {season.status === "open" && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                Moving to <strong>Active</strong> locks all rosters — no further registration
-                changes until season ends.
-              </p>
-            )}
-          </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
@@ -390,6 +344,58 @@ function EditSeasonDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Archive confirmation
+// ---------------------------------------------------------------------------
+
+function ArchiveSeasonDialog({
+  season,
+  onOpenChange,
+}: {
+  season: SeasonRead;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () => seasonsApi.update(season.id, { is_archived: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["seasons"] });
+      toast.success(`Season "${season.name}" archived`);
+      onOpenChange(false);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Archive className="h-5 w-5" />
+            Archive season
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          <p>
+            Archive <strong>&quot;{season.name}&quot;</strong>?
+          </p>
+          <p className="text-muted-foreground">
+            Archived seasons are fully complete. The season will no longer advance through
+            status stages and can be permanently deleted if needed.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+            {mutation.isPending ? "Archiving…" : "Archive season"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -446,7 +452,7 @@ function DeleteSeasonDialog({
               </p>
               <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
                 Only <strong>Draft</strong> and <strong>Archived</strong> seasons can be deleted.
-                Active or closed seasons with live data must be archived first.
+                Active or closed seasons must be archived first.
               </div>
             </div>
             <DialogFooter>
@@ -489,7 +495,7 @@ function DeleteSeasonDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Season card — detailed view
+// Season timeline strip
 // ---------------------------------------------------------------------------
 
 function SeasonTimeline({ season }: { season: SeasonRead }) {
@@ -532,6 +538,7 @@ function SeasonTimeline({ season }: { season: SeasonRead }) {
 export default function SeasonsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editSeason, setEditSeason] = useState<SeasonRead | null>(null);
+  const [archiveSeason, setArchiveSeason] = useState<SeasonRead | null>(null);
   const [deleteSeason, setDeleteSeason] = useState<SeasonRead | null>(null);
   const { isLeagueLevel } = useCurrentUser();
 
@@ -542,12 +549,14 @@ export default function SeasonsPage() {
 
   const canDelete = (s: SeasonRead) =>
     isLeagueLevel && (s.status === "draft" || s.status === "archived");
+  const canArchive = (s: SeasonRead) =>
+    isLeagueLevel && s.status === "closed";
 
   return (
     <div>
       <PageHeader
         title="Seasons"
-        description="Manage league seasons, registration windows, and season lifecycle"
+        description="Manage league seasons and registration windows. Status advances automatically as dates pass."
         action={
           isLeagueLevel ? (
             <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
@@ -593,7 +602,7 @@ export default function SeasonsPage() {
                   <TableCell>
                     <div className="flex flex-col gap-1">
                       <span className="font-medium">{season.name}</span>
-                      <SeasonTimeline season={season} />
+                      {season.status !== "archived" && <SeasonTimeline season={season} />}
                     </div>
                   </TableCell>
                   <TableCell>{season.year}</TableCell>
@@ -617,14 +626,27 @@ export default function SeasonsPage() {
                   {isLeagueLevel && (
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setEditSeason(season)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
+                        {!season.is_archived && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => setEditSeason(season)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {canArchive(season) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            title="Archive season"
+                            onClick={() => setArchiveSeason(season)}
+                          >
+                            <Archive className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         {canDelete(season) && (
                           <Button
                             variant="ghost"
@@ -648,7 +670,7 @@ export default function SeasonsPage() {
       {/* Season lifecycle explanation */}
       <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          Season lifecycle
+          Season lifecycle — automatic
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {(["draft", "open", "active", "closed"] as SeasonStatus[]).map((s) => (
@@ -668,6 +690,12 @@ export default function SeasonsPage() {
         <EditSeasonDialog
           season={editSeason}
           onOpenChange={(v) => { if (!v) setEditSeason(null); }}
+        />
+      )}
+      {archiveSeason && (
+        <ArchiveSeasonDialog
+          season={archiveSeason}
+          onOpenChange={(v) => { if (!v) setArchiveSeason(null); }}
         />
       )}
       {deleteSeason && (

@@ -27,7 +27,7 @@ from app.models.registration import (
     RegistrationType,
 )
 from app.models.release import PlayerRelease, ReleaseDocument, ReleaseStatus
-from app.models.season import Season, SeasonStatus
+from app.models.season import Season
 from main import app
 
 NOW = datetime.now(tz=UTC)
@@ -68,8 +68,6 @@ def season(db: Session) -> Season:
         year=2025,
         registration_open_at=NOW - timedelta(days=1),
         registration_close_at=NOW + timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
     )
     db.add(s)
     db.commit()

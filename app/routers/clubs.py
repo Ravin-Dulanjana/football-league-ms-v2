@@ -80,6 +80,9 @@ def get_logo_upload_url(
     filename: str,
     content_type: str = "image/jpeg",
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(
+        require_role("super_admin", "league_admin", "club_admin")
+    ),
 ) -> dict[str, object]:
     """
     Returns a pre-signed POST URL and form fields.
@@ -98,6 +101,11 @@ def get_logo_upload_url(
     club = club_service.get_club_by_id(db, club_id)
     if club is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found.")
+    if current_user.role == "club_admin" and current_user.club_id != club_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Club admins can only update their own club's logo.",
+        )
 
     return storage.generate_upload_url(
         folder=f"clubs/{club_id}/logos",

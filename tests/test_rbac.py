@@ -29,7 +29,7 @@ from app.models.club_season import (
     ClubUnlockRequest,
     UnlockRequestStatus,
 )
-from app.models.season import Season, SeasonStatus
+from app.models.season import Season
 from main import app
 
 # ---------------------------------------------------------------------------
@@ -45,15 +45,14 @@ def make_client(db: Session, user: CurrentUser) -> TestClient:
 
 
 def _open_season(db: Session) -> Season:
-    """Insert and return an open season with a registration window that is active."""
+    """Insert and return a season whose status computes to OPEN from current date."""
     now = datetime.now(tz=UTC)
     season = Season(
         name="2026 Season",
         year=2026,
         registration_open_at=now - timedelta(days=1),
         registration_close_at=now + timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
+        season_end_date=now + timedelta(days=120),
     )
     db.add(season)
     db.commit()
@@ -62,15 +61,14 @@ def _open_season(db: Session) -> Season:
 
 
 def _closed_season(db: Session) -> Season:
-    """Insert and return a closed season (window has passed)."""
+    """Insert and return a season whose status computes to CLOSED from current date."""
     now = datetime.now(tz=UTC)
     season = Season(
         name="2025 Season",
         year=2025,
         registration_open_at=now - timedelta(days=60),
         registration_close_at=now - timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
+        season_end_date=now - timedelta(days=5),
     )
     db.add(season)
     db.commit()
@@ -423,16 +421,14 @@ def test_club_staff_max_6_enforced(
 
 
 # ---------------------------------------------------------------------------
-# Test 8: season status transition draft → archived directly is rejected
+# Test 8: season status is auto-computed from dates and can be archived manually
 # ---------------------------------------------------------------------------
 
 
-def test_season_cannot_jump_from_draft_to_archived(
-    client: TestClient, db: Session
-) -> None:
+def test_season_auto_status_and_archive(client: TestClient, db: Session) -> None:
     """
-    PATCH /seasons/{id}/ with status=archived when current status=draft
-    must return 400.  Only draft→open is valid.
+    Status is derived from dates, not stored.  A future-registration season
+    returns 'draft'; PATCH with is_archived=true returns 'archived'.
     """
     now = datetime.now(tz=UTC)
     season = Season(
@@ -440,18 +436,22 @@ def test_season_cannot_jump_from_draft_to_archived(
         year=2027,
         registration_open_at=now + timedelta(days=1),
         registration_close_at=now + timedelta(days=30),
-        status=SeasonStatus.DRAFT,
     )
     db.add(season)
     db.commit()
     db.refresh(season)
 
-    response = client.patch(
-        f"/seasons/{season.id}/",
-        json={"status": "archived"},
-    )
-    assert response.status_code == 400, response.text
-    assert "archived" in response.json()["detail"].lower()
+    # Status auto-computed as draft (registration hasn't opened yet)
+    r = client.get("/seasons/")
+    assert r.status_code == 200
+    match = next((s for s in r.json() if s["id"] == season.id), None)
+    assert match is not None
+    assert match["status"] == "draft"
+
+    # Archive via PATCH
+    r2 = client.patch(f"/seasons/{season.id}/", json={"is_archived": True})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["status"] == "archived"
 
 
 # ---------------------------------------------------------------------------
@@ -691,9 +691,9 @@ def test_season_create_notifies_club_admins(db: Session) -> None:
         assert notif is not None, f"No notification for club_admin id={uid}"
 
 
-def test_season_status_change_writes_audit_and_notifies(db: Session) -> None:
+def test_season_archive_writes_audit_and_notifies(db: Session) -> None:
     """
-    Test 14: PATCH /seasons/{id}/ with a status change must write AuditLog
+    Test 14: PATCH /seasons/{id}/ with is_archived=true must write AuditLog
     AND create Notification rows for club_admins.
     """
     from sqlalchemy import select  # noqa: PLC0415
@@ -704,8 +704,8 @@ def test_season_status_change_writes_audit_and_notifies(db: Session) -> None:
 
     # Plant a club_admin to receive the notification
     watcher = User(
-        cognito_sub="ca-status-watcher",
-        email="watcher@test.com",
+        cognito_sub="ca-archive-watcher",
+        email="archive-watcher@test.com",
         role="club_admin",
         is_active=True,
         is_deleted=False,
@@ -714,33 +714,33 @@ def test_season_status_change_writes_audit_and_notifies(db: Session) -> None:
     db.commit()
     db.refresh(watcher)
 
-    # Create a draft season directly in DB (bypasses the service, avoids audit noise)
-    draft_season = Season(
-        name="Status Change Season",
+    # A season in the past (closed) that an admin wants to archive
+    now = datetime.now(tz=UTC)
+    past_season = Season(
+        name="Archive Test Season",
         year=2032,
-        registration_open_at=datetime.now(tz=UTC) + timedelta(days=1),
-        registration_close_at=datetime.now(tz=UTC) + timedelta(days=60),
-        status=SeasonStatus.DRAFT,
-        is_locked=False,
+        registration_open_at=now - timedelta(days=60),
+        registration_close_at=now - timedelta(days=30),
+        season_end_date=now - timedelta(days=5),
     )
-    db.add(draft_season)
+    db.add(past_season)
     db.commit()
-    db.refresh(draft_season)
+    db.refresh(past_season)
 
     super_admin = CurrentUser(id=999, role="super_admin")
     with make_client(db, super_admin) as c:
         response = c.patch(
-            f"/seasons/{draft_season.id}/",
-            json={"status": "open"},
+            f"/seasons/{past_season.id}/",
+            json={"is_archived": True},
         )
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == "open"
+    assert response.json()["status"] == "archived"
 
     # Audit log written
     log = db.execute(
         select(AuditLog).where(
             AuditLog.action == "season.update",
-            AuditLog.entity_id == draft_season.id,
+            AuditLog.entity_id == past_season.id,
         )
     ).scalar_one_or_none()
     assert log is not None
@@ -750,7 +750,7 @@ def test_season_status_change_writes_audit_and_notifies(db: Session) -> None:
     notif = db.execute(
         select(Notification).where(
             Notification.user_id == watcher.id,
-            Notification.event_type == "season.status_changed",
+            Notification.event_type == "season.archived",
         )
     ).scalar_one_or_none()
     assert notif is not None
@@ -978,19 +978,18 @@ def test_release_create_writes_audit_log(db: Session) -> None:
     assert log.actor_id == club_admin.id
 
 
-def test_invalid_season_status_transition_rejected(db: Session) -> None:
+def test_season_status_auto_computed_not_manually_settable(db: Session) -> None:
     """
-    Test 19: PATCH /seasons/{id}/ with an invalid status jump (draft→archived)
-    must return 400.  This is a direct re-test of the VALID_TRANSITIONS guard
-    now that the route captures current_user properly.
+    Test 19: Season status is derived from dates, not from a status field in the
+    PATCH body.  Sending a `status` field is silently ignored; the returned status
+    reflects the computed value from the season's dates.
     """
+    now = datetime.now(tz=UTC)
     draft_season = Season(
-        name="Invalid Transition Season",
+        name="Auto Status Season",
         year=2033,
-        registration_open_at=datetime.now(tz=UTC) + timedelta(days=1),
-        registration_close_at=datetime.now(tz=UTC) + timedelta(days=60),
-        status=SeasonStatus.DRAFT,
-        is_locked=False,
+        registration_open_at=now + timedelta(days=1),
+        registration_close_at=now + timedelta(days=60),
     )
     db.add(draft_season)
     db.commit()
@@ -998,9 +997,14 @@ def test_invalid_season_status_transition_rejected(db: Session) -> None:
 
     super_admin = CurrentUser(id=999, role="super_admin")
     with make_client(db, super_admin) as c:
+        # status field is not in SeasonUpdate — it should be ignored
         response = c.patch(
             f"/seasons/{draft_season.id}/",
-            json={"status": "archived"},
+            json={"status": "archived", "name": "Auto Status Season Renamed"},
         )
-    assert response.status_code == 400, response.text
-    assert "Cannot transition" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    data = response.json()
+    # Status is still draft (computed from dates), not archived
+    assert data["status"] == "draft"
+    # The name change was applied
+    assert data["name"] == "Auto Status Season Renamed"
