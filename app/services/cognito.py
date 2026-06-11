@@ -66,7 +66,25 @@ def login(email: str, password: str) -> dict[str, Any]:
             status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication service unavailable"
         ) from exc
 
-    result = resp["AuthenticationResult"]
+    # Cognito may return a challenge (e.g. NEW_PASSWORD_REQUIRED) instead of tokens
+    # when the account was created by an admin with a temporary password.
+    # Without this guard, resp["AuthenticationResult"] raises KeyError → 500.
+    if "ChallengeName" in resp:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "A password reset is required for this account. "
+            "Ask your administrator to issue a password reset via the Users page.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    result = resp.get("AuthenticationResult")
+    if not result:
+        logger.error("Cognito login: no AuthenticationResult and no ChallengeName")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Authentication service returned an unexpected response",
+        )
+
     return {
         "access_token": result["AccessToken"],
         "id_token": result["IdToken"],
