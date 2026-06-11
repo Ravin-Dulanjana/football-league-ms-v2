@@ -29,6 +29,7 @@ export function useCurrentUser() {
     isLeagueAdmin: role === "league_admin",
     isClubAdmin: role === "club_admin",
     isPlayer: role === "player",
+    isClubStaff: role === "club_staff",
     isLeagueLevel: role === "super_admin" || role === "league_admin",
     isAnyAdmin:
       role === "super_admin" || role === "league_admin" || role === "club_admin",

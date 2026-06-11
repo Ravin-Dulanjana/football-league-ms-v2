@@ -80,18 +80,14 @@ def create_user(
     """
     # Enforce creation hierarchy:
     #   super_admin  → any role
-    #   league_admin → league_admin, club_admin, player (not super_admin)
-    #   club_admin   → player only
+    #   league_admin → league_admin, club_admin, player, club_staff (not super_admin)
+    #   club_admin   → player or club_staff only
     role = current_user.role
     target_role = data.role
     if role == "league_admin" and target_role == "super_admin":
         return None, "League admins cannot create super_admin accounts."
-    if role == "club_admin" and target_role != "player":
-        return None, "Club admins can only create player accounts."
-
-    # club_admin role requires a club_id
-    if target_role == "club_admin" and not data.club_id:
-        return None, "club_id is required when creating a club_admin account."
+    if role == "club_admin" and target_role not in ("player", "club_staff"):
+        return None, "Club admins can only create player or club_staff accounts."
 
     # Check email is not already taken
     existing = db.execute(
@@ -100,10 +96,15 @@ def create_user(
     if existing:
         return None, "A user with that email already exists."
 
-    # For player accounts, create the Player profile first so we get a player_id.
+    # Derive member_type: explicit value, or infer from role for base roles
+    member_type = data.member_type
+    if member_type is None and target_role in ("player", "club_staff"):
+        member_type = target_role
+
+    # Create a Player profile for player accounts (role=player OR member_type=player)
     player_id: int | None = None
     new_player: Player | None = None
-    if target_role == "player":
+    if target_role == "player" or member_type == "player":
         try:
             new_player = player_service.create_player(
                 db,
@@ -136,6 +137,7 @@ def create_user(
         cognito_sub=cognito_sub,
         email=data.email,
         role=data.role,
+        member_type=member_type,
         club_id=data.club_id,
         player_id=player_id,
         is_active=True,
@@ -151,7 +153,12 @@ def create_user(
         action="user.create",
         entity_type="User",
         entity_id=user.id,
-        details={"email": data.email, "role": data.role, "club_id": data.club_id},
+        details={
+            "email": data.email,
+            "role": data.role,
+            "member_type": member_type,
+            "club_id": data.club_id,
+        },
     )
     db.commit()
     db.refresh(user)
@@ -160,6 +167,7 @@ def create_user(
             "event": "user.create.complete",
             "user_id": user.id,
             "role": user.role,
+            "member_type": user.member_type,
             "actor_id": current_user.id,
         }
     )
@@ -210,6 +218,132 @@ def soft_delete_user(
         entity_type="User",
         entity_id=target.id,
         details={"reason": reason},
+    )
+    db.commit()
+    db.refresh(target)
+    return target, None
+
+
+def hard_delete_user(
+    db: Session,
+    target: User,
+    current_user: CurrentUser,
+) -> tuple[bool, str | None]:
+    """
+    Permanently delete a user record and their Cognito account.
+
+    Only callable by super_admin. The user must have been soft-deleted first
+    (is_deleted=True) so there is an intentional two-step process: soft delete
+    → review → hard delete.
+
+    Returns (True, None) on success, (False, error_message) on failure.
+    """
+    if not target.is_deleted:
+        return False, "User must be soft-deleted before permanent deletion."
+    user_id = target.id
+    email = target.email
+    cognito_sub = target.cognito_sub
+    # Remove from Cognito first; if this fails we abort so the DB record survives
+    if not _cognito_delete_user(cognito_sub):
+        return False, "Failed to remove Cognito account. DB record preserved."
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="user.hard_delete",
+        entity_type="User",
+        entity_id=user_id,
+        details={"email": email},
+    )
+    db.delete(target)
+    db.commit()
+    return True, None
+
+
+def restore_user(
+    db: Session,
+    target: User,
+    current_user: CurrentUser,
+) -> tuple[User | None, str | None]:
+    """
+    Restore a soft-deleted user (super_admin only).
+
+    Clears is_deleted, re-activates the account, and resets deletion timestamps.
+    The Cognito account is NOT re-enabled here — the admin should also
+    issue a password reset so the user can log in again.
+    """
+    if not target.is_deleted:
+        return None, "This user has not been deleted."
+    target.is_deleted = False
+    target.is_active = True
+    target.deleted_at = None
+    target.deleted_by = None
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="user.restore",
+        entity_type="User",
+        entity_id=target.id,
+        details={"email": target.email},
+    )
+    db.commit()
+    db.refresh(target)
+    return target, None
+
+
+def assign_role(
+    db: Session,
+    target: User,
+    new_role: str,
+    new_club_id: int | None,
+    reason: str,
+    current_user: CurrentUser,
+) -> tuple[User | None, str | None]:
+    """
+    Change a user's governance role (super_admin only).
+
+    Used at AGMs or when someone is elected/removed from a position.
+    The user's member_type (player/club_staff) is PRESERVED — roles are additive
+    identities, not replacements of who the person fundamentally is.
+
+    If new_role is club_admin, new_club_id is required.
+    """
+    if target.role == "super_admin":
+        return None, "The super_admin role cannot be changed via this action."
+    if new_role == "club_admin" and not new_club_id:
+        return None, "club_id is required when assigning the club_admin role."
+
+    old_role = target.role
+    old_club_id = target.club_id
+
+    target.role = new_role
+    if new_role == "club_admin":
+        target.club_id = new_club_id
+    elif new_role in ("player", "club_staff", "league_admin"):
+        # League admin and base roles may have no club or a voluntary club link
+        if new_club_id is not None:
+            target.club_id = new_club_id
+        # Stepping down from club_admin — clear club link unless explicitly kept
+        elif old_role == "club_admin":
+            target.club_id = None
+
+    # Sync to Cognito so next JWT reflects the new role
+    _cognito_update_role(target.cognito_sub, new_role, target.club_id)
+
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="user.assign_role",
+        entity_type="User",
+        entity_id=target.id,
+        details={
+            "old_role": old_role,
+            "new_role": new_role,
+            "old_club_id": old_club_id,
+            "new_club_id": target.club_id,
+            "reason": reason,
+        },
     )
     db.commit()
     db.refresh(target)
@@ -460,3 +594,48 @@ def _send_temp_password_email(email: str, temp_password: str) -> None:
         )
     except Exception:
         logger.exception({"event": "ses.send_temp_password.error", "email": email})
+
+
+def _cognito_delete_user(cognito_sub: str) -> bool:
+    """Permanently delete a Cognito user. Returns True on success."""
+    if not settings.cognito_user_pool_id:
+        return True  # dev mode
+    try:
+        client = boto3.client("cognito-idp", region_name=settings.cognito_region)
+        client.admin_delete_user(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=cognito_sub,
+        )
+        return True
+    except Exception:
+        logger.exception({"event": "cognito.admin_delete_user.error"})
+        return False
+
+
+def _cognito_update_role(cognito_sub: str, new_role: str, club_id: int | None) -> bool:
+    """
+    Update a user's custom:role (and optionally custom:club_id) in Cognito.
+
+    Called when a governance role is assigned or revoked via the Users page.
+    The next JWT the user obtains will carry the new role claim.
+    Returns True on success; errors are logged but not re-raised.
+    """
+    if not settings.cognito_user_pool_id:
+        return True  # dev mode
+    try:
+        client = boto3.client("cognito-idp", region_name=settings.cognito_region)
+        attrs = [{"Name": "custom:role", "Value": new_role}]
+        if club_id is not None:
+            attrs.append({"Name": "custom:club_id", "Value": str(club_id)})
+        else:
+            # Clear the club_id attribute so stale values don't linger
+            attrs.append({"Name": "custom:club_id", "Value": ""})
+        client.admin_update_user_attributes(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=cognito_sub,
+            UserAttributes=attrs,
+        )
+        return True
+    except Exception:
+        logger.exception({"event": "cognito.admin_update_role.error"})
+        return False

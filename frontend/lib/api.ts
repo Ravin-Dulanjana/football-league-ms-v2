@@ -16,6 +16,7 @@
 import type {
   AccountActionRequest,
   AnalyticsSummary,
+  AssignRoleRequest,
   AuditLogRead,
   ClubCreate,
   ClubRead,
@@ -270,6 +271,15 @@ export const usersApi = {
   accountAction: (id: number, data: AccountActionRequest) =>
     apiFetch<UserRead>(`/users/${id}/account-action/`, {
       method: "POST",
+      body: JSON.stringify(data),
+    }),
+  hardDelete: (id: number) =>
+    apiFetch<void>(`/users/${id}/hard-delete/`, { method: "DELETE" }),
+  restore: (id: number) =>
+    apiFetch<UserRead>(`/users/${id}/restore/`, { method: "POST" }),
+  assignRole: (id: number, data: AssignRoleRequest) =>
+    apiFetch<UserRead>(`/users/${id}/role/`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     }),
 };

@@ -6,11 +6,16 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, field_validator, model_validator
 
+# Valid role values — kept in one place so schemas and tests both import from here.
+VALID_ROLES = {"super_admin", "league_admin", "club_admin", "player", "club_staff"}
+VALID_MEMBER_TYPES = {"player", "club_staff"}
+
 
 class UserRead(BaseModel):
     id: int
     email: str
     role: str
+    member_type: str | None
     club_id: int | None
     player_id: int | None
     is_active: bool
@@ -26,20 +31,27 @@ class UserCreate(BaseModel):
     """
     Used by super_admin and league_admin to create user accounts.
 
-    When role=player, pass full_name, date_of_birth, and nic_number.
-    The backend creates the Player record automatically — do not pass player_id.
+    Role values:
+      player      — creates a Player profile automatically (full_name, dob, nic req'd)
+      club_staff  — club member without a player profile; club_id required
+      club_admin  — governance role for a club; club_id required; member_type optional
+      league_admin — governance role; club_id optional; member_type optional
+      super_admin — reserved for the system owner; super_admin only
 
-    When role=club_admin, club_id is required.
+    member_type tracks the user's base club-membership identity independently of
+    their governance role:
+      "player"     — has a footballer profile
+      "club_staff" — club staff (coach, physio, secretary, etc.)
+      None         — pure governance / no club membership (league_admin-only accounts)
     """
 
     email: str
     role: str
+    member_type: str | None = None
     club_id: int | None = None
-    # Temporary password — must be changed on first login.
-    # Must meet Cognito's password policy (min 8, upper, lower, digit, symbol).
     temporary_password: str
 
-    # Player profile fields — required when role=player, ignored otherwise.
+    # Player profile fields — required when role=player or member_type=player.
     full_name: str | None = None
     date_of_birth: date | None = None
     nic_number: str | None = None
@@ -47,14 +59,22 @@ class UserCreate(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        valid = {"super_admin", "league_admin", "club_admin", "player"}
-        if v not in valid:
-            raise ValueError(f"role must be one of {valid}")
+        if v not in VALID_ROLES:
+            raise ValueError(f"role must be one of {sorted(VALID_ROLES)}")
+        return v
+
+    @field_validator("member_type")
+    @classmethod
+    def validate_member_type(cls, v: str | None) -> str | None:
+        if v is not None and v not in VALID_MEMBER_TYPES:
+            raise ValueError(f"member_type must be one of {sorted(VALID_MEMBER_TYPES)}")
         return v
 
     @model_validator(mode="after")
-    def player_fields_required(self) -> UserCreate:
-        if self.role == "player":
+    def validate_fields(self) -> UserCreate:
+        # Player profile required for player role or player member_type
+        needs_player_profile = self.role == "player" or self.member_type == "player"
+        if needs_player_profile:
             missing = [
                 f
                 for f in ("full_name", "date_of_birth", "nic_number")
@@ -62,9 +82,54 @@ class UserCreate(BaseModel):
             ]
             if missing:
                 raise ValueError(
-                    f"full_name, date_of_birth, and nic_number are required "
-                    f"when role=player (missing: {', '.join(missing)})"
+                    "full_name, date_of_birth, and nic_number are required "
+                    "when role=player or member_type=player "
+                    f"(missing: {', '.join(missing)})"
                 )
+        # club_id required for club_admin and club_staff
+        if self.role in ("club_admin", "club_staff") and not self.club_id:
+            raise ValueError(f"club_id is required when role={self.role}")
+        return self
+
+
+class AssignRoleRequest(BaseModel):
+    """
+    Body for PATCH /users/{id}/role/ — change a user's governance role.
+
+    Used during AGMs or when people change positions in the league/club.
+    The user's member_type (player/club_staff) is NOT changed by this action.
+
+    new_role    — the role to assign (cannot set super_admin)
+    club_id     — required when new_role=club_admin; clears when omitted
+    reason      — mandatory audit note (e.g. "Elected club president at AGM 2026")
+    """
+
+    new_role: str
+    club_id: int | None = None
+    reason: str
+
+    @field_validator("new_role")
+    @classmethod
+    def validate_new_role(cls, v: str) -> str:
+        assignable = {"league_admin", "club_admin", "player", "club_staff"}
+        if v not in assignable:
+            raise ValueError(
+                f"new_role must be one of {sorted(assignable)} "
+                "(super_admin cannot be assigned via this endpoint)"
+            )
+        return v
+
+    @field_validator("reason")
+    @classmethod
+    def reason_required(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("reason is required and cannot be blank")
+        return v
+
+    @model_validator(mode="after")
+    def club_id_for_club_admin(self) -> AssignRoleRequest:
+        if self.new_role == "club_admin" and not self.club_id:
+            raise ValueError("club_id is required when assigning the club_admin role")
         return self
 
 
@@ -82,7 +147,7 @@ class AccountActionRequest(BaseModel):
 
     action: str
     reason: str
-    # Required for reset_password; optional for other actions.
+    # Required for some actions (e.g. update_mobile uses new_value as the number).
     new_value: str | None = None
 
     @field_validator("action")

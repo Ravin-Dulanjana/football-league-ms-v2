@@ -24,10 +24,8 @@ export const metadata: Metadata = {
     template: "%s | Wattala Football League",
   },
   description: "Wattala Football League Management System — registration, releases, and season management.",
-  icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
-  },
+  // app/icon.png in the same directory is auto-detected by Next.js 14 App Router.
+  // The metadata.icons entry below is a belt-and-suspenders fallback for older browsers.
 };
 
 export default function RootLayout({
