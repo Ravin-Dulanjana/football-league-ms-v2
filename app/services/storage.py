@@ -39,13 +39,20 @@ from app.config import settings
 
 def _s3_client() -> Any:
     """
-    Creates a boto3 S3 client for the configured region.
+    Creates a boto3 S3 client pinned to the configured region.
 
-    A new client is created per call.  boto3 client creation is cheap
-    and thread-safe.  The alternative (module-level singleton) would
-    make it harder to test because you'd need to patch before import.
+    We set endpoint_url explicitly so that generate_presigned_post returns a
+    regional URL (e.g. s3.ap-southeast-1.amazonaws.com).  Without this,
+    boto3 uses the global s3.amazonaws.com endpoint and S3 returns a 307
+    redirect — presigned URLs cannot be followed because the signature is
+    bound to the original URL, not the redirect target.
     """
-    return boto3.client("s3", region_name=settings.aws_region)
+    region = settings.aws_region or "us-east-1"
+    return boto3.client(
+        "s3",
+        region_name=region,
+        endpoint_url=f"https://s3.{region}.amazonaws.com",
+    )
 
 
 def generate_upload_url(

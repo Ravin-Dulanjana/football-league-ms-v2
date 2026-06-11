@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Building2,
+  Camera,
   CheckCircle2,
   ClipboardCheck,
   Mail,
@@ -115,6 +116,37 @@ function EditClubDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoPreview, setLogoPreview] = useState<string | null>(club.logo_url ?? null);
+
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const { url, fields, key } = await clubsApi.logoUploadUrl(
+        club.id,
+        file.name,
+        file.type || "image/jpeg"
+      );
+      const formData = new FormData();
+      Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
+      formData.append("file", file);
+      const s3Res = await fetch(url, { method: "POST", body: formData });
+      if (!s3Res.ok) throw new Error("Upload to S3 failed");
+      await clubsApi.update(club.id, { logo_key: key });
+      queryClient.invalidateQueries({ queryKey: ["club", club.id] });
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      setLogoPreview(URL.createObjectURL(file));
+      toast.success("Club logo updated");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLogoUploading(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
 
   const form = useForm<EditClubForm>({
     resolver: zodResolver(editClubSchema),
@@ -161,6 +193,40 @@ function EditClubDialog({
         <DialogHeader>
           <DialogTitle>Edit club details</DialogTitle>
         </DialogHeader>
+        {/* Logo upload — outside the main form so it doesn't require saving */}
+        <div className="flex items-center gap-4 pb-2 border-b border-border">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-bold overflow-hidden border border-border">
+              {logoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoPreview} alt={club.name} className="w-full h-full object-cover" />
+              ) : (
+                <span>{club.name.charAt(0)}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => logoInputRef.current?.click()}
+              disabled={logoUploading}
+              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 disabled:opacity-50"
+              title="Change logo"
+            >
+              {logoUploading ? <span className="text-[10px]">…</span> : <Camera className="h-3 w-3" />}
+            </button>
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleLogoChange}
+            />
+          </div>
+          <div>
+            <p className="text-sm font-medium">Club logo</p>
+            <p className="text-xs text-muted-foreground">Click the camera icon to upload</p>
+          </div>
+        </div>
+
         <form
           onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
           className="space-y-4"

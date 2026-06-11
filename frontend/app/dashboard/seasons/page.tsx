@@ -296,11 +296,6 @@ function EditSeasonDialog({
         <DialogHeader>
           <DialogTitle>Edit season — {season.name}</DialogTitle>
         </DialogHeader>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground -mt-1">
-          <span>Current status:</span>
-          <StatusBadge status={season.status} />
-          <span className="text-xs">(auto-computed from dates)</span>
-        </div>
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="space-y-1.5">
             <Label>Season name *</Label>
