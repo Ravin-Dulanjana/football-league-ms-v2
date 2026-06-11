@@ -103,15 +103,27 @@ def create_user(
     if existing:
         return None, "A user with that email already exists."
 
-    # Derive member_type: explicit value, or infer from role for base roles
-    member_type = data.member_type
-    if member_type is None and target_role in ("player", "club_staff"):
-        member_type = target_role
+    # A player profile is created when:
+    #   a) the role is player (mandatory), or
+    #   b) personal details are supplied for any account type — every person
+    #      in the league is registered as an identity even if they are staff
+    #      or an unplaced account.
+    has_personal_details = bool(
+        data.full_name and data.date_of_birth and data.nic_number
+    )
+    create_player_profile = target_role == "player" or has_personal_details
 
-    # Create a Player profile for player accounts (role=player OR member_type=player)
+    # Derive member_type: if a player profile is being created the person has
+    # a footballer identity; otherwise infer from role for base roles.
+    member_type = data.member_type
+    if create_player_profile:
+        member_type = "player"
+    elif member_type is None and target_role == "club_staff":
+        member_type = "club_staff"
+
     player_id: int | None = None
     new_player: Player | None = None
-    if target_role == "player" or member_type == "player":
+    if create_player_profile:
         try:
             new_player = player_service.create_player(
                 db,
