@@ -25,9 +25,15 @@ router = APIRouter(prefix="/registration-requests", tags=["registration-requests
 @router.get("/", response_model=list[RegistrationRequestRead])
 def list_requests(
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> list[RegistrationRequest]:
-    return registration_service.get_all_requests(db)
+    """
+    Returns registration requests scoped by caller role:
+    - club_admin: only their own club's requests
+    - player: only requests for their own player_id
+    - league_admin / super_admin: all requests
+    """
+    return registration_service.get_all_requests(db, current_user)
 
 
 @router.post(
