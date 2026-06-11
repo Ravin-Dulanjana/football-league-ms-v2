@@ -14,6 +14,7 @@ from app.models.registration import PlayerSeasonRegistration, RegistrationReques
 from app.models.release import PlayerRelease, ReleaseDocument
 from app.models.season import Season
 from app.models.user import User
+from app.models.user_governance_role import UserGovernanceRole
 
 __all__ = [
     "AuditLog",
@@ -33,4 +34,5 @@ __all__ = [
     "ReleaseDocument",
     "Season",
     "User",
+    "UserGovernanceRole",
 ]

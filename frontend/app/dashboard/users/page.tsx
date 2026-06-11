@@ -379,9 +379,15 @@ function AssignRoleDialog({
       };
       return usersApi.assignRole(user!.id, payload);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      toast.success("Role assigned successfully");
+      const isStepDown = ["player", "club_staff"].includes(variables.new_role);
+      toast.success(isStepDown ? "Role updated — all governance roles cleared" : "Role added successfully");
+      // JWT-based delay notice: the affected user must re-login for their token to reflect the change
+      toast.info(
+        "The user must log out and back in for role changes to take effect in their session.",
+        { duration: 7000 }
+      );
       onOpenChange(false);
       form.reset();
     },
@@ -399,12 +405,20 @@ function AssignRoleDialog({
         </DialogHeader>
 
         {user && (
-          <p className="text-xs text-muted-foreground -mt-2 pb-1">
-            Current role: <span className="font-medium">{user.role.replace(/_/g, " ")}</span>
-            {user.member_type && user.member_type !== user.role && (
-              <> · member type: <span className="font-medium">{user.member_type}</span></>
+          <div className="-mt-2 pb-1 space-y-1">
+            {user.governance_roles && user.governance_roles.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Current governance roles:{" "}
+                <span className="font-medium">
+                  {user.governance_roles.map((g) => g.role.replace(/_/g, " ")).join(", ")}
+                </span>
+              </p>
             )}
-          </p>
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Governance roles are <strong>additive</strong> — assigning league_admin keeps existing club_admin.
+              Assigning player/club_staff clears all governance roles.
+            </p>
+          </div>
         )}
 
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
@@ -496,22 +510,24 @@ function AssignRoleDialog({
 // Role tags — shows identity (member_type) + governance role as separate badges
 // ---------------------------------------------------------------------------
 
-// Roles that grant admin/governance access (not base identities)
-const GOVERNANCE_ROLES = new Set(["super_admin", "league_admin", "club_admin"]);
-
 function RoleCell({ user }: { user: UserRead }) {
-  const hasGovernance = GOVERNANCE_ROLES.has(user.role);
+  // governance_roles lists all stacked governance roles (club_admin + league_admin etc.)
+  const govRoles = user.governance_roles ?? [];
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {/* Identity tag — always shown unless super_admin (who has no member_type) */}
+      {/* Identity tag — the person's base club-membership type */}
       {user.member_type && <StatusBadge status={user.member_type} />}
 
-      {/* Governance tag — shown in addition to identity when they have an admin role */}
-      {hasGovernance && <StatusBadge status={user.role} />}
+      {/* All active governance role tags */}
+      {govRoles.map((gr, i) => (
+        <StatusBadge key={`${gr.role}-${i}`} status={gr.role} />
+      ))}
 
-      {/* Fallback for super_admin (no member_type) */}
-      {!user.member_type && !hasGovernance && <StatusBadge status={user.role} />}
+      {/* Fallback: no member_type AND no governance roles → show role directly */}
+      {!user.member_type && govRoles.length === 0 && (
+        <StatusBadge status={user.role} />
+      )}
     </div>
   );
 }

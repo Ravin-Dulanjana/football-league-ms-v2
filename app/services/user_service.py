@@ -31,8 +31,13 @@ from app.dependencies import CurrentUser
 from app.middleware.logging import get_logger
 from app.models.player import Player  # used for type annotation of new_player
 from app.models.user import User
+from app.models.user_governance_role import UserGovernanceRole
 from app.schemas.player import PlayerCreate
-from app.schemas.user import AccountActionRequest, UserCreate
+from app.schemas.user import (
+    AccountActionRequest,
+    UserCreate,
+    highest_role,
+)
 from app.services import audit_service, player_service
 from app.services.role_checks import is_super_admin
 
@@ -45,6 +50,37 @@ logger = get_logger(__name__)
 
 def get_user_by_id(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
+
+
+def get_governance_roles(
+    db: Session, user_ids: list[int]
+) -> dict[int, list[UserGovernanceRole]]:
+    """Return a mapping of user_id → list of UserGovernanceRole rows."""
+    if not user_ids:
+        return {}
+    rows = list(
+        db.execute(
+            select(UserGovernanceRole).where(UserGovernanceRole.user_id.in_(user_ids))
+        )
+        .scalars()
+        .all()
+    )
+    result: dict[int, list[UserGovernanceRole]] = {}
+    for row in rows:
+        result.setdefault(row.user_id, []).append(row)
+    return result
+
+
+def attach_governance_roles(db: Session, users: list[User]) -> list[User]:
+    """
+    Load governance roles from the junction table and attach them to each
+    User object as a transient attribute so UserRead serialisation can access
+    them without requiring a SQLAlchemy relationship.
+    """
+    gmap = get_governance_roles(db, [u.id for u in users])
+    for user in users:
+        user.governance_roles = gmap.get(user.id, [])  # type: ignore[attr-defined]
+    return users
 
 
 def get_all_users(
@@ -60,7 +96,8 @@ def get_all_users(
     q = select(User)
     if not (is_super_admin(current_user) and include_deleted):
         q = q.where(User.is_deleted.is_(False))
-    return list(db.execute(q.order_by(User.id)).scalars().all())
+    users = list(db.execute(q.order_by(User.id)).scalars().all())
+    return attach_governance_roles(db, users)
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +222,19 @@ def create_user(
     )
     db.commit()
     db.refresh(user)
+    # Seed governance role in junction table for governance roles
+    if data.role in GOVERNANCE_ROLE_SET:
+        db.add(
+            UserGovernanceRole(
+                user_id=user.id,
+                role=data.role,
+                club_id=club_id if data.role == "club_admin" else None,
+                assigned_by_id=current_user.id,
+                reason="Initial account creation",
+            )
+        )
+        db.commit()
+    attach_governance_roles(db, [user])
     logger.info(
         {
             "event": "user.create.complete",
@@ -244,6 +294,7 @@ def soft_delete_user(
     )
     db.commit()
     db.refresh(target)
+    attach_governance_roles(db, [target])
     return target, None
 
 
@@ -311,7 +362,11 @@ def restore_user(
     )
     db.commit()
     db.refresh(target)
+    attach_governance_roles(db, [target])
     return target, None
+
+
+GOVERNANCE_ROLE_SET = frozenset({"super_admin", "league_admin", "club_admin"})
 
 
 def assign_role(
@@ -323,13 +378,14 @@ def assign_role(
     current_user: CurrentUser,
 ) -> tuple[User | None, str | None]:
     """
-    Change a user's governance role (super_admin only).
+    Add a governance role to a user (super_admin only).
 
-    Used at AGMs or when someone is elected/removed from a position.
-    The user's member_type (player/club_staff) is PRESERVED — roles are additive
-    identities, not replacements of who the person fundamentally is.
+    Roles are now ADDITIVE — assigning league_admin to a club_admin keeps
+    both.  The junction table records all active governance roles;
+    users.role stores the highest for JWT backwards-compatibility.
 
-    If new_role is club_admin, new_club_id is required.
+    Assigning a base role (player / club_staff) clears all governance roles
+    and resets the user to their member_type identity (i.e. "step down").
     """
     if target.role == "super_admin":
         return None, "The super_admin role cannot be changed via this action."
@@ -337,21 +393,88 @@ def assign_role(
         return None, "club_id is required when assigning the club_admin role."
 
     old_role = target.role
-    old_club_id = target.club_id
 
-    target.role = new_role
-    if new_role == "club_admin":
-        target.club_id = new_club_id
-    elif new_role in ("player", "club_staff", "league_admin"):
-        # League admin and base roles may have no club or a voluntary club link
+    if new_role in ("player", "club_staff"):
+        # Stepping down — remove all governance roles from junction table
+        db.execute(
+            select(UserGovernanceRole).where(UserGovernanceRole.user_id == target.id)
+        )
+        existing_govs = list(
+            db.execute(
+                select(UserGovernanceRole).where(
+                    UserGovernanceRole.user_id == target.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in existing_govs:
+            db.delete(row)
+
+        target.role = new_role
+        # For club_staff stepping down, keep club_id if provided
         if new_club_id is not None:
             target.club_id = new_club_id
-        # Stepping down from club_admin — clear club link unless explicitly kept
         elif old_role == "club_admin":
             target.club_id = None
+        _cognito_update_role(target.cognito_sub, new_role, target.club_id)
+    else:
+        # Adding/updating a governance role — append to junction table
+        # If the same role (and same club for club_admin) already exists, skip
+        existing = (
+            db.execute(
+                select(UserGovernanceRole).where(
+                    UserGovernanceRole.user_id == target.id,
+                    UserGovernanceRole.role == new_role,
+                )
+            )
+            .scalars()
+            .first()
+        )
 
-    # Sync to Cognito so next JWT reflects the new role
-    _cognito_update_role(target.cognito_sub, new_role, target.club_id)
+        if existing:
+            # Update in-place (e.g. re-assigning club_admin to a different club)
+            if new_role == "club_admin":
+                existing.club_id = new_club_id
+            existing.assigned_by_id = current_user.id
+            existing.reason = reason
+        else:
+            db.add(
+                UserGovernanceRole(
+                    user_id=target.id,
+                    role=new_role,
+                    club_id=new_club_id if new_role == "club_admin" else None,
+                    assigned_by_id=current_user.id,
+                    reason=reason,
+                )
+            )
+
+        db.flush()
+
+        # Recompute highest role from junction table
+        all_gov_roles = list(
+            db.execute(
+                select(UserGovernanceRole).where(
+                    UserGovernanceRole.user_id == target.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        role_names = [r.role for r in all_gov_roles]
+        top_role = highest_role(role_names)
+        target.role = top_role
+
+        # club_id on users row = the club from the club_admin entry (if any)
+        club_admin_entry = next(
+            (r for r in all_gov_roles if r.role == "club_admin"), None
+        )
+        if club_admin_entry:
+            target.club_id = club_admin_entry.club_id
+        elif new_club_id is not None:
+            target.club_id = new_club_id
+
+        _cognito_update_role(target.cognito_sub, top_role, target.club_id)
 
     db.flush()
     audit_service.write_audit_log(
@@ -363,13 +486,13 @@ def assign_role(
         details={
             "old_role": old_role,
             "new_role": new_role,
-            "old_club_id": old_club_id,
-            "new_club_id": target.club_id,
+            "new_club_id": new_club_id,
             "reason": reason,
         },
     )
     db.commit()
     db.refresh(target)
+    attach_governance_roles(db, [target])
     return target, None
 
 

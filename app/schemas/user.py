@@ -10,6 +10,35 @@ from pydantic import BaseModel, field_validator, model_validator
 VALID_ROLES = {"super_admin", "league_admin", "club_admin", "player", "club_staff"}
 VALID_MEMBER_TYPES = {"player", "club_staff", "user"}
 
+# Roles that carry governance meaning (shown as extra tags in the UI)
+GOVERNANCE_ROLES = frozenset({"super_admin", "league_admin", "club_admin"})
+
+# Role hierarchy for computing the "highest" role to store in users.role
+_ROLE_RANK: dict[str, int] = {
+    "super_admin": 50,
+    "league_admin": 40,
+    "club_admin": 30,
+    "club_staff": 20,
+    "player": 10,
+}
+
+
+def highest_role(roles: list[str]) -> str:
+    """Return the single highest-ranked role from a list."""
+    if not roles:
+        return "player"
+    return max(roles, key=lambda r: _ROLE_RANK.get(r, 0))
+
+
+class GovernanceRoleRead(BaseModel):
+    """One entry in a user's governance-role list."""
+
+    role: str
+    club_id: int | None
+    assigned_at: datetime
+
+    model_config = {"from_attributes": True}
+
 
 class UserRead(BaseModel):
     id: int
@@ -23,6 +52,8 @@ class UserRead(BaseModel):
     force_password_change: bool
     created_at: datetime
     last_login_at: datetime | None
+    # All active governance roles (club_admin + league_admin can coexist, etc.)
+    governance_roles: list[GovernanceRoleRead] = []
 
     model_config = {"from_attributes": True}
 

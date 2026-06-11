@@ -28,6 +28,12 @@ export type UserRole =
 
 export type MemberType = "player" | "club_staff" | "user";
 
+export interface GovernanceRoleRead {
+  role: string;
+  club_id: number | null;
+  assigned_at: string;
+}
+
 export interface UserRead {
   id: number;
   email: string;
@@ -40,6 +46,8 @@ export interface UserRead {
   force_password_change: boolean;
   created_at: string; // ISO datetime string from JSON
   last_login_at: string | null;
+  // All active governance roles (can hold club_admin + league_admin simultaneously)
+  governance_roles: GovernanceRoleRead[];
 }
 
 export interface UserCreate {

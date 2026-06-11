@@ -45,6 +45,7 @@ def get_me(
     user = user_service.get_user_by_id(db, current_user.id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    user_service.attach_governance_roles(db, [user])
     return user
 
 
@@ -63,6 +64,7 @@ def get_user(
     user = user_service.get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    user_service.attach_governance_roles(db, [user])
     return user
 
 
