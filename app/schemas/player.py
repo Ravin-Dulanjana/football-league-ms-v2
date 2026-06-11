@@ -14,9 +14,8 @@ class PlayerRead(BaseModel):
     full_name: str
     date_of_birth: date
     nic_number: str
-    # photo_key is the raw S3 object key stored in the database.
-    # photo_url is computed from it — not stored, built at serialisation time.
     photo_key: str | None
+    club_id: int | None
     status: PlayerStatus
     created_at: datetime
     updated_at: datetime

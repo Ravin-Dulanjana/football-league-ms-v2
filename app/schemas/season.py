@@ -13,6 +13,7 @@ class SeasonRead(BaseModel):
     year: int
     registration_open_at: datetime
     registration_close_at: datetime
+    season_end_date: datetime | None
     is_locked: bool
     status: SeasonStatus
     created_at: datetime
@@ -25,11 +26,14 @@ class SeasonCreate(BaseModel):
     year: int
     registration_open_at: datetime
     registration_close_at: datetime
+    season_end_date: datetime | None = None
 
     @model_validator(mode="after")
-    def check_window_order(self) -> SeasonCreate:
+    def check_date_order(self) -> SeasonCreate:
         if self.registration_close_at <= self.registration_open_at:
             raise ValueError("registration_close_at must be after registration_open_at")
+        if self.season_end_date and self.season_end_date <= self.registration_close_at:
+            raise ValueError("season_end_date must be after registration_close_at")
         return self
 
 
@@ -37,5 +41,6 @@ class SeasonUpdate(BaseModel):
     name: str | None = None
     registration_open_at: datetime | None = None
     registration_close_at: datetime | None = None
-    is_locked: bool | None = None
+    season_end_date: datetime | None = None
+    # is_locked is managed automatically — not accepted from callers
     status: SeasonStatus | None = None

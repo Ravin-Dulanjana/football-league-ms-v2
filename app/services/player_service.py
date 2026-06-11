@@ -10,14 +10,43 @@ from sqlalchemy.orm import Session
 from app.middleware.logging import get_logger
 from app.middleware.request_id import request_id_var
 from app.models.player import Player
+from app.models.user import User
 from app.schemas.player import PlayerCreate, PlayerUpdate
 
 logger = get_logger(__name__)
 
 
-def get_all_players(db: Session) -> list[Player]:
-    result = db.execute(select(Player).order_by(Player.id))
-    return list(result.scalars().all())
+_SENTINEL = object()
+
+
+def get_all_players(
+    db: Session,
+    club_id: int | None | object = _SENTINEL,
+    *,
+    free_only: bool = False,
+) -> list[Player]:
+    """
+    Return player records only — exclude entries linked to club_staff users.
+
+    A player record is created for every account with personal details,
+    regardless of member_type.  This filter ensures the players list only
+    shows actual footballers (member_type = 'player') or unlinked profiles
+    (no user account yet).
+
+    club_id:   if provided (not sentinel), filter to that club.
+    free_only: if True, return only players with no club (club_id IS NULL).
+    """
+    q = (
+        select(Player)
+        .outerjoin(User, User.player_id == Player.id)
+        .where((User.member_type == "player") | (User.id.is_(None)))
+    )
+    if free_only:
+        q = q.where(Player.club_id.is_(None))
+    elif club_id is not _SENTINEL:
+        q = q.where(Player.club_id == club_id)
+    q = q.order_by(Player.id)
+    return list(db.execute(q).scalars().all())
 
 
 def get_player_by_id(db: Session, player_id: int) -> Player | None:

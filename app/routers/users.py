@@ -73,7 +73,7 @@ def get_user(
 def list_users(
     include_deleted: bool = Query(False, alias="include_deleted"),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_league_admin_or_above),
+    current_user: CurrentUser = Depends(require_any_admin),
 ) -> list[User]:
     """
     super_admin sees all users; with ?include_deleted=1 also sees soft-deleted.

@@ -187,6 +187,7 @@ export interface PlayerRead {
   nic_number: string;
   photo_key: string | null;
   photo_url: string | null;
+  club_id: number | null;
   status: PlayerStatus;
   created_at: string;
   updated_at: string;
@@ -209,7 +210,7 @@ export interface PlayerUpdate {
 // Season
 // ---------------------------------------------------------------------------
 
-export type SeasonStatus = "draft" | "open" | "closed" | "archived";
+export type SeasonStatus = "draft" | "open" | "active" | "closed" | "archived";
 
 export interface SeasonRead {
   id: number;
@@ -217,6 +218,7 @@ export interface SeasonRead {
   year: number;
   registration_open_at: string;
   registration_close_at: string;
+  season_end_date: string | null;
   is_locked: boolean;
   status: SeasonStatus;
   created_at: string;
@@ -227,14 +229,39 @@ export interface SeasonCreate {
   year: number;
   registration_open_at: string;
   registration_close_at: string;
+  season_end_date?: string;
 }
 
 export interface SeasonUpdate {
   name?: string;
   registration_open_at?: string;
   registration_close_at?: string;
-  is_locked?: boolean;
+  season_end_date?: string | null;
   status?: SeasonStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Club Membership (cross-season player membership)
+// ---------------------------------------------------------------------------
+
+export type ClubMembershipRequestStatus = "pending" | "accepted" | "rejected" | "cancelled";
+
+export interface ClubMembershipRequestRead {
+  id: number;
+  player_id: number;
+  club_id: number;
+  requested_by_user_id: number;
+  status: ClubMembershipRequestStatus;
+  responded_at: string | null;
+  created_at: string;
+}
+
+export interface ClubMembershipRequestCreate {
+  player_id: number;
+}
+
+export interface ClubMembershipDecide {
+  decision: "accept" | "reject";
 }
 
 // ---------------------------------------------------------------------------

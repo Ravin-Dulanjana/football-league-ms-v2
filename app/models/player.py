@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, String, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -24,6 +24,14 @@ class Player(Base):
     # Stores the S3 object key (e.g. "players/photos/uuid.jpg"), not a URL.
     # The CloudFront URL is built at read time by get_file_url() in storage.py.
     photo_key: Mapped[str | None] = mapped_column(String(512))
+    # Current club membership — null means the player is free (not in any club).
+    # Set when a ClubMembershipRequest is accepted; cleared when released.
+    club_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("clubs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[PlayerStatus] = mapped_column(
         Enum(
             PlayerStatus,

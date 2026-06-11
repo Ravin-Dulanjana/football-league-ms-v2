@@ -18,6 +18,7 @@ import {
   ScrollText,
   Shield,
   Shirt,
+  UserCheck,
   Users,
   UserCircle,
 } from "lucide-react";
@@ -47,7 +48,13 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Players", href: "/dashboard/players", icon: Shirt },
   { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
 
-  // Player + club staff + club admin
+  // Club admin + players + staff
+  {
+    label: "Club Roster",
+    href: "/dashboard/club-memberships",
+    icon: UserCheck,
+    roles: ["super_admin", "league_admin", "club_admin"],
+  },
   {
     label: "Registrations",
     href: "/dashboard/registrations",
@@ -66,7 +73,7 @@ const NAV_ITEMS: NavItem[] = [
     label: "Seasons",
     href: "/dashboard/seasons",
     icon: ScrollText,
-    roles: ["super_admin", "league_admin"],
+    roles: ["super_admin", "league_admin", "club_admin"],
   },
   {
     label: "Squad Submissions",
@@ -102,7 +109,7 @@ const NAV_ITEMS: NavItem[] = [
     label: "Users",
     href: "/dashboard/users",
     icon: Users,
-    roles: ["super_admin", "league_admin"],
+    roles: ["super_admin", "league_admin", "club_admin"],
   },
   {
     label: "Reports",

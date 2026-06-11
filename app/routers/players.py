@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -16,9 +16,19 @@ router = APIRouter(prefix="/players", tags=["players"])
 
 @router.get("/", response_model=list[PlayerRead])
 def list_players(
+    club_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(get_current_user),  # any authenticated user
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> list[Player]:
+    """
+    Returns player profiles only (not club_staff).
+    club_admin callers are automatically scoped to their own club.
+    """
+    effective_club_id = club_id
+    if current_user.role == "club_admin" and current_user.club_id:
+        effective_club_id = current_user.club_id
+    if effective_club_id is not None:
+        return player_service.get_all_players(db, club_id=effective_club_id)
     return player_service.get_all_players(db)
 
 
