@@ -61,7 +61,7 @@ import type { AccountAction, AssignRoleRequest, ClubRead, UserRead, UserRole } f
 // accountType drives the form UI. It maps to a backend role as follows:
 //   player     → role=player     (player profile required)
 //   club_staff → role=club_staff (club required; auto-set for club_admin)
-//   account    → role=league_admin (no club, no player profile — for officials)
+//   account    → role=club_staff, no club (generic user — assign a role later)
 //
 // club_admin and super_admin are never created via this form.
 // Governance roles (league_admin, club_admin) are assigned after creation
@@ -144,7 +144,7 @@ function CreateUserDialog({
     },
     account: {
       label: "Account",
-      hint: "No club affiliation. Use Assign Role later to grant admin access.",
+      hint: "No club yet. Assign a role later once they are placed.",
     },
   };
 
@@ -159,7 +159,7 @@ function CreateUserDialog({
       const roleMap: Record<AccountType, string> = {
         player: "player",
         club_staff: "club_staff",
-        account: "league_admin",
+        account: "club_staff",
       };
       return usersApi.create({
         email: data.email,
