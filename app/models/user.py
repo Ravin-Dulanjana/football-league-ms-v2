@@ -18,8 +18,12 @@ class User(Base):
     and track account lifecycle.
 
     cognito_sub           — the immutable UUID Cognito assigns to every user.
-    role                  — mirrors custom:role from the Cognito ID token.
-                            Updated on each request if the admin changed it.
+    role                  — primary governance/access role (mirrors custom:role).
+                            Updated on each request if an admin changed it.
+    member_type           — base club-membership type: "player" or "club_staff".
+                            Preserved when a governance role (club_admin/league_admin)
+                            is assigned on top. Null for super_admin and league-only
+                            admins who have no club membership.
     club_id               — mirrors custom:club_id (club_admin only).
     player_id             — mirrors custom:player_id (player only).
     is_active             — False means the account is deactivated.
@@ -36,6 +40,9 @@ class User(Base):
     cognito_sub: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Base club-membership type; preserved when a governance role is assigned.
+    # "player" | "club_staff" | None (None for super_admin / league-only admins)
+    member_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # FK-like columns without FOREIGN KEY constraints so records can exist
     # before the linked club/player is created (admin accounts have neither).
     club_id: Mapped[int | None] = mapped_column(

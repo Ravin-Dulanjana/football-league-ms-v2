@@ -19,12 +19,20 @@ export interface TokenResponse {
 // User
 // ---------------------------------------------------------------------------
 
-export type UserRole = "super_admin" | "league_admin" | "club_admin" | "player";
+export type UserRole =
+  | "super_admin"
+  | "league_admin"
+  | "club_admin"
+  | "club_staff"
+  | "player";
+
+export type MemberType = "player" | "club_staff";
 
 export interface UserRead {
   id: number;
   email: string;
   role: UserRole;
+  member_type: MemberType | null;
   club_id: number | null;
   player_id: number | null;
   is_active: boolean;
@@ -37,12 +45,19 @@ export interface UserRead {
 export interface UserCreate {
   email: string;
   role: UserRole;
+  member_type?: MemberType;
   club_id?: number;
   temporary_password: string;
   // Player profile — required when role=player, ignored otherwise.
   full_name?: string;
   date_of_birth?: string;
   nic_number?: string;
+}
+
+export interface AssignRoleRequest {
+  new_role: string;
+  club_id?: number | null;
+  reason: string;
 }
 
 export type AccountAction =

@@ -44,18 +44,18 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Players", href: "/dashboard/players", icon: Shirt },
   { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
 
-  // Player + club admin
+  // Player + club staff + club admin
   {
     label: "Registrations",
     href: "/dashboard/registrations",
     icon: ClipboardList,
-    roles: ["club_admin", "player"],
+    roles: ["club_admin", "club_staff", "player"],
   },
   {
     label: "Releases",
     href: "/dashboard/releases",
     icon: FileText,
-    roles: ["club_admin", "player"],
+    roles: ["club_admin", "club_staff", "player"],
   },
 
   // League admin and above

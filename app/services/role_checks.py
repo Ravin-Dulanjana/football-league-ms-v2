@@ -55,6 +55,20 @@ def can_manage_club(user: CurrentUser, club_id: int) -> bool:
     return is_club_admin(user, club_id)
 
 
+def is_club_staff(user: CurrentUser) -> bool:
+    """True if the user's primary role is club_staff (no governance role)."""
+    return user.role == "club_staff"
+
+
+def is_base_club_member(user: CurrentUser) -> bool:
+    """
+    True if the user is a base club member (player or club_staff) with no
+    additional governance role. They can see their own club activity but
+    cannot perform administrative actions.
+    """
+    return user.role in {"player", "club_staff"}
+
+
 def has_any_admin_role(user: CurrentUser) -> bool:
     """
     True if the user holds any administrative role.

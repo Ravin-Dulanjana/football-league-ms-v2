@@ -1,11 +1,14 @@
 """
 User management endpoints.
 
-GET  /users/                  — super_admin and league_admin only
-POST /users/                  — super_admin and league_admin only
-PATCH /users/{id}/            — super_admin only
-DELETE /users/{id}/           — super_admin only (soft delete)
-POST /users/{id}/account-action/ — super_admin and league_admin (scoped)
+GET  /users/                       — super_admin and league_admin only
+POST /users/                       — super_admin and league_admin only
+PATCH /users/{id}/                 — super_admin only (stub)
+DELETE /users/{id}/                — super_admin only (soft delete)
+POST /users/{id}/account-action/   — super_admin and league_admin (scoped)
+DELETE /users/{id}/hard-delete/    — super_admin only (permanent)
+POST /users/{id}/restore/          — super_admin only
+PATCH /users/{id}/role/            — super_admin only (assign/change governance role)
 """
 
 from __future__ import annotations
@@ -18,10 +21,12 @@ from app.dependencies import CurrentUser
 from app.dependencies.roles import (
     require_any_admin,
     require_league_admin_or_above,
+    require_super_admin,
 )
 from app.models.user import User
 from app.schemas.user import (
     AccountActionRequest,
+    AssignRoleRequest,
     SoftDeleteRequest,
     UserCreate,
     UserRead,
@@ -143,6 +148,92 @@ def account_action(
         code = (
             status.HTTP_403_FORBIDDEN
             if "cannot" in error.lower() or "league admin" in error.lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(code, error)
+    return updated  # type: ignore[return-value]
+
+
+@router.delete(
+    "/{user_id}/hard-delete/",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def hard_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin),
+) -> None:
+    """
+    Permanently delete a user record and their Cognito account.
+
+    super_admin only. The user must already be soft-deleted (is_deleted=True).
+    Two-step intentional process: soft-delete → review → hard delete.
+    """
+    target = user_service.get_user_by_id(db, user_id)
+    if target is None:
+        # Also check soft-deleted pool so super_admin can find them
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    ok, error = user_service.hard_delete_user(db, target, current_user)
+    if not ok:
+        code = (
+            status.HTTP_400_BAD_REQUEST
+            if error and "must be" in error.lower()
+            else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        raise HTTPException(code, error)
+
+
+@router.post("/{user_id}/restore/", response_model=UserRead)
+def restore_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin),
+) -> User:
+    """
+    Restore a soft-deleted user (super_admin only).
+
+    Clears is_deleted, re-activates the account.
+    Cognito password should be reset separately so the user can log in again.
+    """
+    # Must look up including deleted users — use a direct DB get (get_user_by_id
+    # returns the row regardless of is_deleted since there is no filter on it).
+    target = user_service.get_user_by_id(db, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    restored, error = user_service.restore_user(db, target, current_user)
+    if error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, error)
+    return restored  # type: ignore[return-value]
+
+
+@router.patch("/{user_id}/role/", response_model=UserRead)
+def assign_role(
+    user_id: int,
+    body: AssignRoleRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_super_admin),
+) -> User:
+    """
+    Assign or change a user's governance role (super_admin only).
+
+    The user's member_type (player/club_staff) is preserved — this action only
+    changes the governance/access role, not the person's fundamental identity.
+
+    Example use cases:
+      - Player elected club president → assign club_admin (member_type stays "player")
+      - Club admin steps down → assign player or club_staff
+      - Player appointed league official → assign league_admin
+    """
+    target = user_service.get_user_by_id(db, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    updated, error = user_service.assign_role(
+        db, target, body.new_role, body.club_id, body.reason, current_user
+    )
+    if error:
+        code = (
+            status.HTTP_403_FORBIDDEN
+            if "cannot" in error.lower()
             else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(code, error)
