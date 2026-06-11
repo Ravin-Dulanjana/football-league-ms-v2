@@ -58,37 +58,44 @@ import type { AccountAction, AssignRoleRequest, ClubRead, UserRead, UserRole } f
 // Create user dialog
 // ---------------------------------------------------------------------------
 
-const createSchema = z
-  .object({
-    email: z.string().email("Invalid email"),
-    role: z.enum([
-      "super_admin",
-      "league_admin",
-      "club_admin",
-      "club_staff",
-      "player",
-    ] as const),
-    club_id: z.number().optional(),
-    temporary_password: z.string().min(8, "At least 8 characters"),
-    full_name: z.string().optional(),
-    date_of_birth: z.string().optional(),
-    nic_number: z.string().optional(),
-  })
-  .superRefine((val, ctx) => {
-    if (val.role === "player") {
-      if (!val.full_name?.trim())
-        ctx.addIssue({ code: "custom", path: ["full_name"], message: "Required for players" });
-      if (!val.date_of_birth)
-        ctx.addIssue({ code: "custom", path: ["date_of_birth"], message: "Required for players" });
-      if (!val.nic_number?.trim())
-        ctx.addIssue({ code: "custom", path: ["nic_number"], message: "Required for players" });
-    }
-    if ((val.role === "club_admin" || val.role === "club_staff") && !val.club_id) {
-      ctx.addIssue({ code: "custom", path: ["club_id"], message: "Club is required for this role" });
-    }
-  });
+// accountType drives the form UI. It maps to a backend role as follows:
+//   player     → role=player     (player profile required)
+//   club_staff → role=club_staff (club required; auto-set for club_admin)
+//   account    → role=league_admin (no club, no player profile — for officials)
+//
+// club_admin and super_admin are never created via this form.
+// Governance roles (league_admin, club_admin) are assigned after creation
+// using the Assign Role action.
 
-type CreateForm = z.infer<typeof createSchema>;
+type AccountType = "player" | "club_staff" | "account";
+
+function makeCreateSchema(creatorIsClubAdmin: boolean) {
+  return z
+    .object({
+      email: z.string().email("Invalid email"),
+      account_type: z.enum(["player", "club_staff", "account"] as const),
+      club_id: z.number().optional(),
+      temporary_password: z.string().min(8, "At least 8 characters"),
+      full_name: z.string().optional(),
+      date_of_birth: z.string().optional(),
+      nic_number: z.string().optional(),
+    })
+    .superRefine((val, ctx) => {
+      if (val.account_type === "player") {
+        if (!val.full_name?.trim())
+          ctx.addIssue({ code: "custom", path: ["full_name"], message: "Required" });
+        if (!val.date_of_birth)
+          ctx.addIssue({ code: "custom", path: ["date_of_birth"], message: "Required" });
+        if (!val.nic_number?.trim())
+          ctx.addIssue({ code: "custom", path: ["nic_number"], message: "Required" });
+      }
+      // League/super admin creating club_staff must pick a club.
+      // Club admins skip the picker — their club is auto-assigned server-side.
+      if (val.account_type === "club_staff" && !creatorIsClubAdmin && !val.club_id) {
+        ctx.addIssue({ code: "custom", path: ["club_id"], message: "Select a club" });
+      }
+    });
+}
 
 function CreateUserDialog({
   open,
@@ -98,18 +105,23 @@ function CreateUserDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  const { isClubAdmin: creatorIsClubAdmin } = useCurrentUser();
 
+  // Only load clubs when the creator can pick one (league/super admin)
   const { data: clubs } = useQuery<ClubRead[]>({
     queryKey: ["clubs"],
     queryFn: clubsApi.list,
-    enabled: open,
+    enabled: open && !creatorIsClubAdmin,
   });
 
+  const schema = makeCreateSchema(creatorIsClubAdmin);
+  type CreateForm = z.infer<typeof schema>;
+
   const form = useForm<CreateForm>({
-    resolver: zodResolver(createSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       email: "",
-      role: "club_admin",
+      account_type: "player",
       temporary_password: "",
       full_name: "",
       date_of_birth: "",
@@ -117,42 +129,98 @@ function CreateUserDialog({
     },
   });
 
-  const role = form.watch("role");
+  const accountType = form.watch("account_type") as AccountType;
+
+  const ACCOUNT_TYPE_LABELS: Record<AccountType, { label: string; hint: string }> = {
+    player: {
+      label: "Player",
+      hint: "Creates a player profile. Club assigned through registration.",
+    },
+    club_staff: {
+      label: "Club Staff",
+      hint: creatorIsClubAdmin
+        ? "Staff member for your club (coach, physio, secretary, etc.)."
+        : "Staff member for a specific club.",
+    },
+    account: {
+      label: "Account",
+      hint: "No club affiliation. Use Assign Role later to grant admin access.",
+    },
+  };
+
+  // Which types are available to this creator?
+  const availableTypes: AccountType[] = creatorIsClubAdmin
+    ? ["player", "club_staff"]
+    : ["player", "club_staff", "account"];
 
   const mutation = useMutation({
-    mutationFn: (data: CreateForm) =>
-      usersApi.create({
+    mutationFn: (data: CreateForm) => {
+      // Map account_type to the backend role
+      const roleMap: Record<AccountType, string> = {
+        player: "player",
+        club_staff: "club_staff",
+        account: "league_admin",
+      };
+      return usersApi.create({
         email: data.email,
-        role: data.role,
-        club_id:
-          data.role === "club_admin" || data.role === "club_staff"
-            ? data.club_id
-            : undefined,
+        role: roleMap[data.account_type as AccountType] as UserRole,
+        // club_id: for club_admin creators, omit it — the service auto-injects.
+        //          for league/super admin creating club_staff, pass the picker value.
+        club_id: !creatorIsClubAdmin && data.account_type === "club_staff"
+          ? data.club_id
+          : undefined,
         temporary_password: data.temporary_password,
-        ...(data.role === "player" && {
+        ...(data.account_type === "player" && {
           full_name: data.full_name,
           date_of_birth: data.date_of_birth,
           nic_number: data.nic_number,
         }),
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      toast.success("User created — they will be prompted to change their password on first login");
+      toast.success("Account created — they will be prompted to set a password on first login");
       onOpenChange(false);
       form.reset();
     },
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const needsClub = role === "club_admin" || role === "club_staff";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{role === "player" ? "New player account" : "New user"}</DialogTitle>
+          <DialogTitle>New account</DialogTitle>
         </DialogHeader>
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
+          {/* Account type selector */}
+          <div className="space-y-1.5">
+            <Label>Account type *</Label>
+            <div className="grid grid-cols-1 gap-2">
+              {availableTypes.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    form.setValue("account_type", t);
+                    form.clearErrors();
+                  }}
+                  className={cn(
+                    "flex flex-col items-start text-left px-3 py-2.5 rounded-md border text-sm transition-colors",
+                    accountType === t
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+                  )}
+                >
+                  <span className="font-medium">{ACCOUNT_TYPE_LABELS[t].label}</span>
+                  <span className="text-xs text-muted-foreground mt-0.5">
+                    {ACCOUNT_TYPE_LABELS[t].hint}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="u-email">Email *</Label>
             <Input id="u-email" type="email" {...form.register("email")} />
@@ -161,37 +229,8 @@ function CreateUserDialog({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Role *</Label>
-            <Controller
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <Select onValueChange={field.onChange} value={field.value}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(
-                      [
-                        "super_admin",
-                        "league_admin",
-                        "club_admin",
-                        "club_staff",
-                        "player",
-                      ] as UserRole[]
-                    ).map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </div>
-
-          {needsClub && (
+          {/* Club picker — only for league/super admin creating club_staff */}
+          {accountType === "club_staff" && !creatorIsClubAdmin && (
             <div className="space-y-1.5">
               <Label>Club *</Label>
               <Controller
@@ -223,7 +262,8 @@ function CreateUserDialog({
             </div>
           )}
 
-          {role === "player" && (
+          {/* Player profile fields */}
+          {accountType === "player" && (
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="full_name">Full name *</Label>
@@ -283,7 +323,7 @@ function CreateUserDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Creating…" : "Create user"}
+              {mutation.isPending ? "Creating…" : "Create account"}
             </Button>
           </DialogFooter>
         </form>
