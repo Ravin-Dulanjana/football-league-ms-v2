@@ -20,6 +20,9 @@ import type {
   RevokeRoleRequest,
   AuditLogRead,
   ClubCreate,
+  ClubMembershipDecide,
+  ClubMembershipRequestCreate,
+  ClubMembershipRequestRead,
   ClubRead,
   ClubSeasonProfileCreate,
   ClubSeasonProfileRead,
@@ -216,6 +219,33 @@ export const seasonsApi = {
     apiFetch<SeasonRead>("/seasons/", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: SeasonUpdate) =>
     apiFetch<SeasonRead>(`/seasons/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  delete: (id: number) =>
+    apiFetch<void>(`/seasons/${id}/`, { method: "DELETE" }),
+};
+
+// ---------------------------------------------------------------------------
+// Club Memberships
+// ---------------------------------------------------------------------------
+
+export const clubMembershipsApi = {
+  listRequests: () => apiFetch<ClubMembershipRequestRead[]>("/club-memberships/requests/"),
+  invite: (data: ClubMembershipRequestCreate) =>
+    apiFetch<ClubMembershipRequestRead>("/club-memberships/requests/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  decide: (id: number, data: ClubMembershipDecide) =>
+    apiFetch<ClubMembershipRequestRead>(`/club-memberships/requests/${id}/decide/`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  cancel: (id: number) =>
+    apiFetch<ClubMembershipRequestRead>(`/club-memberships/requests/${id}/cancel/`, {
+      method: "POST",
+    }),
+  listFreePlayers: () => apiFetch<PlayerRead[]>("/club-memberships/free-players/"),
+  releasePlayer: (playerId: number) =>
+    apiFetch<PlayerRead>(`/club-memberships/release/${playerId}/`, { method: "POST" }),
 };
 
 // ---------------------------------------------------------------------------

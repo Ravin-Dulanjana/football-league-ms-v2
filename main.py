@@ -5,6 +5,7 @@ from app.middleware.request_id import RequestIdMiddleware
 from app.routers import (
     audit_logs,
     auth,
+    club_memberships,
     club_season_profiles,
     club_staff,
     club_unlock_requests,
@@ -36,6 +37,7 @@ app.include_router(seasons.router)
 app.include_router(players.router)
 app.include_router(registration_requests.router)
 app.include_router(releases.router)
+app.include_router(club_memberships.router)
 
 # Phase 8 routers
 app.include_router(users.router)

@@ -16,8 +16,6 @@ router = APIRouter(prefix="/seasons", tags=["seasons"])
 @router.get("/", response_model=list[SeasonRead])
 def list_seasons(
     db: Session = Depends(get_db),
-    # Public endpoint — no auth required (spec: GET /seasons/ public, cached 180s)
-    # TODO: add Cache-Control: max-age=180 header via response parameter
 ) -> list[Season]:
     return season_service.get_all_seasons(db)
 
@@ -26,7 +24,6 @@ def list_seasons(
 def get_season_public(
     season_id: int,
     db: Session = Depends(get_db),
-    # Public endpoint — no auth required
 ) -> Season:
     season = season_service.get_season_by_id(db, season_id)
     if season is None:
@@ -62,3 +59,21 @@ def update_season(
     if error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, error)
     return updated
+
+
+@router.delete("/{season_id}/", status_code=status.HTTP_204_NO_CONTENT)
+def delete_season(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_role("super_admin", "league_admin")),
+) -> None:
+    """
+    Permanently delete a season.  Only allowed for DRAFT or ARCHIVED seasons.
+    Active, open, or closed seasons with live registrations cannot be deleted.
+    """
+    season = season_service.get_season_by_id(db, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Season not found.")
+    ok, error = season_service.delete_season(db, season, current_user)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, error)

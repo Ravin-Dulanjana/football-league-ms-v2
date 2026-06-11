@@ -18,29 +18,35 @@ logger = get_logger(__name__)
 
 VALID_TRANSITIONS: dict[SeasonStatus, set[SeasonStatus]] = {
     SeasonStatus.DRAFT: {SeasonStatus.OPEN},
-    SeasonStatus.OPEN: {SeasonStatus.CLOSED},
+    SeasonStatus.OPEN: {SeasonStatus.ACTIVE},
+    SeasonStatus.ACTIVE: {SeasonStatus.CLOSED},
     SeasonStatus.CLOSED: {SeasonStatus.ARCHIVED},
     SeasonStatus.ARCHIVED: set(),
 }
 
 
 def is_registration_window_open(season: Season) -> bool:
-    """True when season is OPEN, not locked, and now is within the window.
+    """True when season is OPEN and now is within the registration window.
 
-    SQLite returns naive datetimes from DateTime(timezone=True) columns, while
-    PostgreSQL returns tz-aware ones. We normalise by stripping tzinfo when the
-    stored values are naive (test / SQLite path) so the comparison always works.
+    SQLite returns naive datetimes; PostgreSQL returns tz-aware ones.
+    Normalise by stripping tzinfo when the stored values are naive.
     """
     now = datetime.now(tz=UTC)
     open_at = season.registration_open_at
     close_at = season.registration_close_at
     if open_at.tzinfo is None:
         now = now.replace(tzinfo=None)
-    return (
-        season.status == SeasonStatus.OPEN
-        and not season.is_locked
-        and open_at <= now <= close_at
-    )
+    return season.status == SeasonStatus.OPEN and open_at <= now <= close_at
+
+
+def is_roster_locked(season: Season) -> bool:
+    """True when the season is ACTIVE — no roster changes allowed."""
+    return season.status == SeasonStatus.ACTIVE
+
+
+def transfers_allowed(season: Season) -> bool:
+    """True when season is CLOSED — clubs can release/invite players."""
+    return season.status in (SeasonStatus.CLOSED, SeasonStatus.DRAFT)
 
 
 def get_all_seasons(db: Session) -> list[Season]:
@@ -72,7 +78,7 @@ def create_season(db: Session, data: SeasonCreate, current_user: CurrentUser) ->
             "request_id": request_id_var.get(),
         }
     )
-    season = Season(**data.model_dump(), status=SeasonStatus.DRAFT)
+    season = Season(**data.model_dump(), status=SeasonStatus.DRAFT, is_locked=False)
     db.add(season)
     try:
         db.flush()  # get season.id before writing audit / notifications
@@ -133,6 +139,8 @@ def update_season(
         }
     )
     updates = data.model_dump(exclude_unset=True)
+    # is_locked is never accepted from callers — managed automatically below
+    updates.pop("is_locked", None)
 
     if "status" in updates:
         new_status = updates["status"]
@@ -153,10 +161,12 @@ def update_season(
             )
 
     old_status = season.status
-    old_locked = season.is_locked
 
     for field, value in updates.items():
         setattr(season, field, value)
+
+    # Auto-manage is_locked: True only when season is ACTIVE
+    season.is_locked = season.status == SeasonStatus.ACTIVE
 
     db.flush()
 
@@ -180,16 +190,6 @@ def update_season(
             ),
         )
 
-    # Notify club admins of lock-state changes
-    if "is_locked" in updates and season.is_locked != old_locked:
-        lock_word = "locked" if season.is_locked else "unlocked"
-        notification_service.notify_by_role(
-            db,
-            role="club_admin",
-            event_type="season.lock_changed",
-            message=f"Season '{season.name}' has been {lock_word}.",
-        )
-
     db.commit()
     db.refresh(season)
     logger.info(
@@ -201,3 +201,43 @@ def update_season(
     )
     _bump_season_cache()
     return season, None
+
+
+def delete_season(
+    db: Session, season: Season, current_user: CurrentUser
+) -> tuple[bool, str | None]:
+    """
+    Permanently delete a season and all associated data.
+
+    Only allowed when the season is DRAFT or ARCHIVED (never when players
+    have active registrations).  Cascades to registration_requests,
+    player_season_registrations, and club_season_profiles via FK ON DELETE CASCADE.
+    """
+    if season.status not in (SeasonStatus.DRAFT, SeasonStatus.ARCHIVED):
+        return False, (
+            f"Cannot delete a season in '{season.status}' status. "
+            "Only draft or archived seasons may be deleted."
+        )
+
+    season_id = season.id
+    season_name = season.name
+    db.delete(season)
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="season.delete",
+        entity_type="Season",
+        entity_id=season_id,
+        details={"name": season_name},
+    )
+    db.commit()
+    logger.info(
+        {
+            "event": "delete_season.complete",
+            "season_id": season_id,
+            "request_id": request_id_var.get(),
+        }
+    )
+    _bump_season_cache()
+    return True, None

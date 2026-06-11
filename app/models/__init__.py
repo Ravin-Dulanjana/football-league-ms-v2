@@ -1,6 +1,7 @@
 from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.club import Club
+from app.models.club_membership import ClubMembershipRequest
 from app.models.club_season import (
     ClubSeasonComment,
     ClubSeasonProfile,
@@ -36,5 +37,6 @@ __all__ = [
     "LeagueInfo",
     "Season",
     "User",
+    "ClubMembershipRequest",
     "UserGovernanceRole",
 ]
