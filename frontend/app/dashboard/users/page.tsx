@@ -52,7 +52,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usersApi, clubsApi } from "@/lib/api";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
-import type { AccountAction, AssignRoleRequest, ClubRead, UserRead, UserRole } from "@/types";
+import type { AccountAction, AssignRoleRequest, ClubRead, MemberType, UserRead, UserRole } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Create user dialog
@@ -136,7 +136,7 @@ function CreateUserDialog({
     },
     account: {
       label: "Account",
-      hint: "No club yet. Assign a role later once they are placed.",
+      hint: "Generic user with no club yet. Assign a role after creation.",
     },
   };
 
@@ -147,15 +147,21 @@ function CreateUserDialog({
 
   const mutation = useMutation({
     mutationFn: (data: CreateForm) => {
-      // Map account_type to the backend role
-      const roleMap: Record<AccountType, string> = {
+      // account_type → backend role + member_type
+      const roleMap: Record<AccountType, UserRole> = {
         player: "player",
         club_staff: "club_staff",
-        account: "club_staff",
+        account: "club_staff", // generic user: club_staff role, no club, member_type=user
+      };
+      const memberTypeMap: Record<AccountType, MemberType> = {
+        player: "player",
+        club_staff: "club_staff",
+        account: "user",
       };
       return usersApi.create({
         email: data.email,
-        role: roleMap[data.account_type as AccountType] as UserRole,
+        role: roleMap[data.account_type as AccountType],
+        member_type: memberTypeMap[data.account_type as AccountType],
         // club_id: for club_admin creators, omit it — the service auto-injects.
         //          for league/super admin creating club_staff, pass the picker value.
         club_id: !creatorIsClubAdmin && data.account_type === "club_staff"
@@ -487,23 +493,25 @@ function AssignRoleDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Role + member_type display helper
+// Role tags — shows identity (member_type) + governance role as separate badges
 // ---------------------------------------------------------------------------
 
+// Roles that grant admin/governance access (not base identities)
+const GOVERNANCE_ROLES = new Set(["super_admin", "league_admin", "club_admin"]);
+
 function RoleCell({ user }: { user: UserRead }) {
-  const showMemberType =
-    user.member_type &&
-    user.member_type !== user.role &&
-    !["player", "club_staff"].includes(user.role);
+  const hasGovernance = GOVERNANCE_ROLES.has(user.role);
 
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <StatusBadge status={user.role} />
-      {showMemberType && (
-        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-sm dark:bg-blue-900/30 dark:text-blue-400">
-          {user.member_type}
-        </span>
-      )}
+    <div className="flex items-center gap-1 flex-wrap">
+      {/* Identity tag — always shown unless super_admin (who has no member_type) */}
+      {user.member_type && <StatusBadge status={user.member_type} />}
+
+      {/* Governance tag — shown in addition to identity when they have an admin role */}
+      {hasGovernance && <StatusBadge status={user.role} />}
+
+      {/* Fallback for super_admin (no member_type) */}
+      {!user.member_type && !hasGovernance && <StatusBadge status={user.role} />}
     </div>
   );
 }

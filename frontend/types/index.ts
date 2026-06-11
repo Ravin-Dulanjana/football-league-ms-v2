@@ -26,7 +26,7 @@ export type UserRole =
   | "club_staff"
   | "player";
 
-export type MemberType = "player" | "club_staff";
+export type MemberType = "player" | "club_staff" | "user";
 
 export interface UserRead {
   id: number;

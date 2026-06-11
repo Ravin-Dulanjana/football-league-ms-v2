@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 # Valid role values — kept in one place so schemas and tests both import from here.
 VALID_ROLES = {"super_admin", "league_admin", "club_admin", "player", "club_staff"}
-VALID_MEMBER_TYPES = {"player", "club_staff"}
+VALID_MEMBER_TYPES = {"player", "club_staff", "user"}
 
 
 class UserRead(BaseModel):
