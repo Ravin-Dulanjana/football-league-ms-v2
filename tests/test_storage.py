@@ -75,7 +75,7 @@ def _mock_s3_client(presigned_response: dict[str, Any]) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-def test_generate_upload_url_structure() -> None:
+def test_generate_upload_url_structure(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     generate_upload_url should return a dict with the four expected keys:
     url, fields, key, expires_in.
@@ -83,6 +83,7 @@ def test_generate_upload_url_structure() -> None:
     The key must start with the requested folder prefix and end with the
     original file extension.
     """
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "test-bucket")
     mock_client = _mock_s3_client(FAKE_PRESIGNED_RESPONSE)
 
     with patch("app.services.storage.boto3") as mock_boto3:
@@ -116,11 +117,14 @@ def test_generate_upload_url_structure() -> None:
     assert result["key"] == post_call_kwargs["Key"]
 
 
-def test_generate_upload_url_extension_fallback() -> None:
+def test_generate_upload_url_extension_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     If the filename has no extension, the key should end with ".bin"
     (safe unknown-binary fallback).
     """
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "test-bucket")
     mock_client = _mock_s3_client(FAKE_PRESIGNED_RESPONSE)
 
     with patch("app.services.storage.boto3") as mock_boto3:
@@ -134,11 +138,14 @@ def test_generate_upload_url_extension_fallback() -> None:
     assert str(result["key"]).endswith(".bin")
 
 
-def test_generate_upload_url_conditions_include_size_limit() -> None:
+def test_generate_upload_url_conditions_include_size_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     The signed policy must include a content-length-range condition
     so S3 rejects uploads larger than 10 MB.
     """
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "test-bucket")
     mock_client = _mock_s3_client(FAKE_PRESIGNED_RESPONSE)
 
     with patch("app.services.storage.boto3") as mock_boto3:
@@ -204,7 +211,9 @@ def test_delete_file_calls_delete_object() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_club_logo_upload_url_endpoint(client: TestClient, db: Session) -> None:
+def test_club_logo_upload_url_endpoint(
+    client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """
     POST /clubs/{id}/logo-upload-url/ should return the presigned URL structure.
     Returns 404 if the club does not exist.
@@ -214,6 +223,7 @@ def test_club_logo_upload_url_endpoint(client: TestClient, db: Session) -> None:
     db.commit()
     db.refresh(club)
 
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "test-bucket")
     with patch("app.services.storage.boto3") as mock_boto3:
         mock_boto3.client.return_value = _mock_s3_client(FAKE_PRESIGNED_RESPONSE)
         response = client.post(
@@ -237,7 +247,9 @@ def test_club_logo_upload_url_404_for_unknown_club(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_player_photo_upload_url_endpoint(client: TestClient, db: Session) -> None:
+def test_player_photo_upload_url_endpoint(
+    client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """
     POST /players/{id}/photo-upload-url/ should return the presigned URL structure.
     """
@@ -251,6 +263,7 @@ def test_player_photo_upload_url_endpoint(client: TestClient, db: Session) -> No
     db.commit()
     db.refresh(player)
 
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "test-bucket")
     with patch("app.services.storage.boto3") as mock_boto3:
         mock_boto3.client.return_value = _mock_s3_client(FAKE_PRESIGNED_RESPONSE)
         response = client.post(
@@ -265,11 +278,14 @@ def test_player_photo_upload_url_endpoint(client: TestClient, db: Session) -> No
     assert f"players/{player.id}/photos/" in body["key"]
 
 
-def test_release_document_upload_url_endpoint(client: TestClient) -> None:
+def test_release_document_upload_url_endpoint(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """
     POST /releases/document-upload-url/ does NOT require an existing release.
     The document is uploaded first; the key is submitted with the release.
     """
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "test-bucket")
     with patch("app.services.storage.boto3") as mock_boto3:
         mock_boto3.client.return_value = _mock_s3_client(FAKE_PRESIGNED_RESPONSE)
         response = client.post(

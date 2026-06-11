@@ -165,6 +165,35 @@ class AssignRoleRequest(BaseModel):
         return self
 
 
+class RevokeRoleRequest(BaseModel):
+    """
+    Body for POST /users/{id}/role/revoke/ — remove one governance role from a user.
+
+    role    — the governance role to revoke (club_admin / league_admin)
+    club_id — required when role=club_admin to identify the specific entry
+    reason  — mandatory audit note
+    """
+
+    role: str
+    club_id: int | None = None
+    reason: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        revokable = {"league_admin", "club_admin"}
+        if v not in revokable:
+            raise ValueError(f"role must be one of {sorted(revokable)}")
+        return v
+
+    @field_validator("reason")
+    @classmethod
+    def reason_required(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("reason is required and cannot be blank")
+        return v
+
+
 class AccountActionRequest(BaseModel):
     """
     Body for POST /users/{id}/account-action/.
