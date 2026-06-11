@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Mail,
+  Pencil,
+  Phone,
   Plus,
   Shield,
   Shirt,
@@ -57,6 +59,7 @@ import type {
   ClubRead,
   ClubSeasonProfileRead,
   ClubStaffRead,
+  ClubUpdate,
   PlayerRead,
   PlayerSeasonRegistrationRead,
   RegistrationRequestRead,
@@ -77,6 +80,173 @@ const SEGMENTS: { id: Segment; label: string; icon: React.ElementType }[] = [
   { id: "admins", label: "Admins", icon: Shield },
   { id: "squad", label: "Season Squad", icon: ClipboardCheck },
 ];
+
+// ---------------------------------------------------------------------------
+// Edit club dialog
+// ---------------------------------------------------------------------------
+
+const editClubSchema = z.object({
+  name: z.string().min(1, "Required"),
+  short_name: z.string().optional(),
+  code: z.string().min(2).max(10),
+  email: z.string().email("Invalid email").optional().or(z.literal("")),
+  phone_number: z.string().optional().or(z.literal("")),
+  established_year: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || (/^\d{4}$/.test(v) && Number(v) >= 1800 && Number(v) <= 2100),
+      "Must be a valid 4-digit year"
+    ),
+  president_name: z.string().optional().or(z.literal("")),
+  secretary_name: z.string().optional().or(z.literal("")),
+  treasurer_name: z.string().optional().or(z.literal("")),
+});
+
+type EditClubForm = z.infer<typeof editClubSchema>;
+
+function EditClubDialog({
+  club,
+  open,
+  onOpenChange,
+}: {
+  club: ClubRead;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+
+  const form = useForm<EditClubForm>({
+    resolver: zodResolver(editClubSchema),
+    defaultValues: {
+      name: club.name,
+      short_name: club.short_name ?? "",
+      code: club.code,
+      email: club.email ?? "",
+      phone_number: club.phone_number ?? "",
+      established_year: club.established_year ? String(club.established_year) : "",
+      president_name: club.president_name ?? "",
+      secretary_name: club.secretary_name ?? "",
+      treasurer_name: club.treasurer_name ?? "",
+    },
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: EditClubForm) => {
+      const payload: ClubUpdate = {
+        name: data.name,
+        short_name: data.short_name || undefined,
+        code: data.code.toUpperCase(),
+        email: data.email || undefined,
+        phone_number: data.phone_number || undefined,
+        established_year: data.established_year ? Number(data.established_year) : null,
+        president_name: data.president_name || null,
+        secretary_name: data.secretary_name || null,
+        treasurer_name: data.treasurer_name || null,
+      };
+      return clubsApi.update(club.id, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club", club.id] });
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      toast.success("Club updated");
+      onOpenChange(false);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit club details</DialogTitle>
+        </DialogHeader>
+        <form
+          onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
+          className="space-y-4"
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="ec-name">Club name *</Label>
+            <Input id="ec-name" {...form.register("name")} />
+            {form.formState.errors.name && (
+              <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-short">Short name</Label>
+              <Input id="ec-short" {...form.register("short_name")} placeholder="e.g. CFC" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-code">Code *</Label>
+              <Input
+                id="ec-code"
+                {...form.register("code")}
+                className="uppercase"
+                style={{ textTransform: "uppercase" }}
+              />
+              {form.formState.errors.code && (
+                <p className="text-xs text-destructive">{form.formState.errors.code.message}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-email">Contact email</Label>
+              <Input id="ec-email" type="email" {...form.register("email")} />
+              {form.formState.errors.email && (
+                <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-phone">Phone number</Label>
+              <Input id="ec-phone" {...form.register("phone_number")} placeholder="+94 77 000 0000" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="ec-year">Established year</Label>
+            <Input id="ec-year" {...form.register("established_year")} placeholder="e.g. 1987" />
+            {form.formState.errors.established_year && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.established_year.message}
+              </p>
+            )}
+          </div>
+
+          <div className="border-t border-border pt-3 space-y-3">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Club Officials
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-president">President</Label>
+              <Input id="ec-president" {...form.register("president_name")} placeholder="Full name" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-secretary">Secretary</Label>
+              <Input id="ec-secretary" {...form.register("secretary_name")} placeholder="Full name" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ec-treasurer">Treasurer</Label>
+              <Input id="ec-treasurer" {...form.register("treasurer_name")} placeholder="Full name" />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={mutation.isPending}>
+              {mutation.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Add staff dialog (club_admin only, club fixed to their own)
@@ -209,12 +379,14 @@ export default function ClubDetailPage() {
   const clubId = Number(params.id);
   const [segment, setSegment] = useState<Segment>("overview");
   const [addStaffOpen, setAddStaffOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleteStaffTarget, setDeleteStaffTarget] = useState<ClubStaffRead | null>(null);
   const queryClient = useQueryClient();
-  const { user, isClubAdmin } = useCurrentUser();
+  const { user, isClubAdmin, isLeagueLevel } = useCurrentUser();
 
   // Is this the club admin of THIS specific club?
   const isOwnClubAdmin = isClubAdmin && user?.club_id === clubId;
+  const canEdit = isOwnClubAdmin || isLeagueLevel;
 
   const { data: club, isLoading: clubLoading } = useQuery<ClubRead>({
     queryKey: ["club", clubId],
@@ -239,7 +411,6 @@ export default function ClubDetailPage() {
     queryFn: seasonsApi.list,
     enabled: segment === "squad",
   });
-  // Find the open season or fallback to the latest
   const currentSeason = seasons.find((s) => s.status === "open") ?? seasons[seasons.length - 1];
 
   const { data: profiles = [] } = useQuery<ClubSeasonProfileRead[]>({
@@ -276,10 +447,8 @@ export default function ClubDetailPage() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      // Create profile if it doesn't exist yet
       if (!currentProfile) {
         await profilesApi.create({ club_id: clubId, season_id: currentSeason!.id });
-        // Re-fetch profiles to get the new one
         const updated = await profilesApi.list();
         const newProfile = updated.find(
           (p) => p.club_id === clubId && p.season_id === currentSeason!.id
@@ -308,8 +477,13 @@ export default function ClubDetailPage() {
     enabled: segment === "players",
   });
 
+  // Club admins: users who have club_admin in their governance_roles for this club
   const clubAdmins = allUsers.filter(
-    (u) => u.club_id === clubId && u.role === "club_admin" && !u.is_deleted
+    (u) =>
+      !u.is_deleted &&
+      (u.governance_roles ?? []).some(
+        (gr) => gr.role === "club_admin" && gr.club_id === clubId
+      )
   );
 
   const clubPlayerIds = new Set(
@@ -391,11 +565,30 @@ export default function ClubDetailPage() {
                 {club.email}
               </p>
             )}
+            {club.phone_number && (
+              <p className="flex items-center gap-1.5 text-sm text-muted-foreground mt-0.5">
+                <Phone className="h-3.5 w-3.5" />
+                {club.phone_number}
+              </p>
+            )}
           </div>
 
-          <p className="text-xs text-muted-foreground shrink-0">
-            Since {formatDate(club.created_at)}
-          </p>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            {club.established_year && (
+              <p className="text-xs text-muted-foreground">Est. {club.established_year}</p>
+            )}
+            {canEdit && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setEditOpen(true)}
+                className="gap-1.5"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Edit club
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -419,18 +612,42 @@ export default function ClubDetailPage() {
 
       {/* Segment content */}
       {segment === "overview" && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            { label: "Code", value: club.code, mono: true },
-            { label: "Status", value: <StatusBadge status={club.status} /> },
-            { label: "Contact", value: club.email ?? "—" },
-            { label: "Created", value: formatDate(club.created_at) },
-          ].map(({ label, value, mono }) => (
-            <div key={label} className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground mb-1">{label}</p>
-              <p className={`text-sm font-medium ${mono ? "font-mono" : ""}`}>{value}</p>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {[
+              { label: "Code", value: club.code, mono: true },
+              { label: "Email", value: club.email ?? "—" },
+              { label: "Phone", value: club.phone_number ?? "—" },
+            ].map(({ label, value, mono }) => (
+              <div key={label} className="rounded-lg border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                <p className={`text-sm font-medium ${mono ? "font-mono" : ""}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Officials section — only show if any of them are set */}
+          {(club.president_name || club.secretary_name || club.treasurer_name) && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                Club Officials
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { label: "President", value: club.president_name },
+                  { label: "Secretary", value: club.secretary_name },
+                  { label: "Treasurer", value: club.treasurer_name },
+                ]
+                  .filter((o) => o.value)
+                  .map(({ label, value }) => (
+                    <div key={label} className="rounded-lg border border-border bg-card p-4">
+                      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                      <p className="text-sm font-medium">{value}</p>
+                    </div>
+                  ))}
+              </div>
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -543,6 +760,9 @@ export default function ClubDetailPage() {
             <div className="rounded-lg border border-dashed border-border p-8 text-center">
               <Users className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
               <p className="text-sm text-muted-foreground">No club admins assigned</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Assign the club_admin role to a user from the Users page.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -557,8 +777,11 @@ export default function ClubDetailPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{admin.email}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <StatusBadge status={admin.is_active ? "active" : "inactive"} />
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      {admin.member_type && (
+                        <StatusBadge status={admin.member_type} />
+                      )}
+                      <StatusBadge status="club_admin" />
                     </div>
                   </div>
                 </button>
@@ -716,6 +939,14 @@ export default function ClubDetailPage() {
       )}
 
       {/* Dialogs */}
+      {club && (
+        <EditClubDialog
+          club={club}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+      )}
+
       <AddStaffDialog
         clubId={clubId}
         open={addStaffOpen}

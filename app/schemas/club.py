@@ -14,10 +14,15 @@ class ClubRead(BaseModel):
     short_name: str | None
     code: str
     email: str | None
+    phone_number: str | None
     # logo_key is the raw S3 object key stored in the database.
     # logo_url is computed from it — not stored, built at serialisation time.
     logo_key: str | None
     status: ClubStatus
+    established_year: int | None
+    president_name: str | None
+    secretary_name: str | None
+    treasurer_name: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -44,6 +49,11 @@ class ClubCreate(BaseModel):
     short_name: str | None = None
     code: str
     email: str | None = None
+    phone_number: str | None = None
+    established_year: int | None = None
+    president_name: str | None = None
+    secretary_name: str | None = None
+    treasurer_name: str | None = None
     # logo_key is optional on creation — the logo upload is a separate step.
     # Flow: create club → get upload URL → upload to S3 → PATCH with logo_key.
     logo_key: str | None = None
@@ -54,9 +64,14 @@ class ClubUpdate(BaseModel):
     short_name: str | None = None
     code: str | None = None
     email: str | None = None
+    phone_number: str | None = None
     # Set this to the S3 key returned by the logo upload URL endpoint.
     logo_key: str | None = None
     status: ClubStatus | None = None
+    established_year: int | None = None
+    president_name: str | None = None
+    secretary_name: str | None = None
+    treasurer_name: str | None = None
 
 
 class UploadUrlResponse(BaseModel):

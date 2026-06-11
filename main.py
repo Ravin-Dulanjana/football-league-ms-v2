@@ -9,6 +9,7 @@ from app.routers import (
     club_staff,
     club_unlock_requests,
     clubs,
+    league_info,
     notifications,
     players,
     registration_requests,
@@ -44,3 +45,4 @@ app.include_router(club_unlock_requests.router)
 app.include_router(notifications.router)
 app.include_router(audit_logs.router)
 app.include_router(reports.router)
+app.include_router(league_info.router)

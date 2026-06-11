@@ -28,6 +28,8 @@ import type {
   ClubUpdate,
   CommentCreate,
   CommentRead,
+  LeagueInfoRead,
+  LeagueInfoUpdate,
   NotificationPreferenceRead,
   NotificationPreferenceUpdate,
   NotificationRead,
@@ -400,4 +402,21 @@ export const reportsApi = {
     return `/api/proxy?path=${encodeURIComponent(`/reports/export/?${q}`)}`;
   },
   analytics: () => apiFetch<AnalyticsSummary>("/analytics/summary/"),
+};
+
+// ---------------------------------------------------------------------------
+// League Info
+// ---------------------------------------------------------------------------
+
+export const leagueInfoApi = {
+  get: () => apiFetch<LeagueInfoRead>("/league-info/"),
+  update: (data: LeagueInfoUpdate) =>
+    apiFetch<LeagueInfoRead>("/league-info/", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  logoUploadUrl: (filename: string, contentType = "image/jpeg") =>
+    apiFetch<UploadUrlResponse>(
+      `/league-info/logo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`
+    ),
 };

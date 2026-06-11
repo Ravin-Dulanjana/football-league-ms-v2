@@ -8,6 +8,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { Building2, ChevronRight, Plus } from "lucide-react";
 
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,11 +33,9 @@ import {
   ErrorState,
   PageHeader,
 } from "@/components/shared/DataTable";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useRouter } from "next/navigation";
 import { clubsApi } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
 import type { ClubRead } from "@/types";
 
 const schema = z.object({
@@ -120,9 +119,8 @@ export default function ClubsPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Code</TableHead>
-                <TableHead>Status</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>Est.</TableHead>
                 <TableHead className="w-6" />
               </TableRow>
             </TableHeader>
@@ -134,22 +132,33 @@ export default function ClubsPage() {
                   onClick={() => router.push(`/dashboard/clubs/${club.id}`)}
                 >
                   <TableCell>
-                    <div>
-                      <p className="font-medium">{club.name}</p>
-                      {club.short_name && (
-                        <p className="text-xs text-muted-foreground">{club.short_name}</p>
+                    <div className="flex items-center gap-2.5">
+                      {club.logo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={club.logo_url}
+                          alt={club.name}
+                          className="w-7 h-7 rounded-md object-cover shrink-0"
+                        />
+                      ) : (
+                        <div className="w-7 h-7 rounded-md bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+                          {club.code.slice(0, 2)}
+                        </div>
                       )}
+                      <div>
+                        <p className="font-medium">{club.name}</p>
+                        {club.short_name && (
+                          <p className="text-xs text-muted-foreground">{club.short_name}</p>
+                        )}
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">{club.code}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={club.status} />
-                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {club.email ?? "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {formatDate(club.created_at)}
+                    {club.established_year ?? "—"}
                   </TableCell>
                   <TableCell className="w-6">
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
