@@ -134,8 +134,11 @@ export function Sidebar() {
 
   return (
     <aside className="flex flex-col w-56 border-r border-border bg-card shrink-0 h-full">
-      {/* Brand */}
-      <div className="flex items-center gap-2.5 px-4 h-14 border-b border-border">
+      {/* Brand — links to League Info */}
+      <Link
+        href="/dashboard/league-info"
+        className="flex items-center gap-2.5 px-4 h-14 border-b border-border hover:bg-muted/50 transition-colors"
+      >
         <Image
           src="/logo.png"
           alt="Wattala Football League"
@@ -147,7 +150,7 @@ export function Sidebar() {
           <p className="font-semibold text-xs text-foreground tracking-tight truncate">Wattala</p>
           <p className="text-xs text-muted-foreground truncate">Football League</p>
         </div>
-      </div>
+      </Link>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
