@@ -24,6 +24,10 @@ export const metadata: Metadata = {
     template: "%s | Wattala Football League",
   },
   description: "Wattala Football League Management System — registration, releases, and season management.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

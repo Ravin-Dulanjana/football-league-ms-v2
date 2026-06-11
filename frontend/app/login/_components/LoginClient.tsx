@@ -182,11 +182,12 @@ function LoginContent() {
               {step === "otp" && "Two-factor verification"}
               {step === "force_password" && "Change your password"}
             </CardTitle>
-            <CardDescription>
-              {step === "login" && "Enter your email and password"}
-              {step === "otp" && "We sent a code to your registered device"}
-              {step === "force_password" && "Your administrator has reset your password"}
-            </CardDescription>
+            {(step === "otp" || step === "force_password") && (
+              <CardDescription>
+                {step === "otp" && "We sent a code to your registered device"}
+                {step === "force_password" && "Your administrator has reset your password"}
+              </CardDescription>
+            )}
           </CardHeader>
 
           <CardContent>

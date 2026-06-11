@@ -294,8 +294,8 @@ export default function UsersPage() {
   });
 
   const actionMutation = useMutation({
-    mutationFn: ({ userId, action }: { userId: number; action: AccountAction; reason: string }) =>
-      usersApi.accountAction(userId, { action, reason: "" }),
+    mutationFn: ({ userId, action, reason }: { userId: number; action: AccountAction; reason: string }) =>
+      usersApi.accountAction(userId, { action, reason }),
     onSuccess: (_, { action }) => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       const labels: Record<AccountAction, string> = {
