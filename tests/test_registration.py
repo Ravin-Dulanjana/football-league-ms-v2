@@ -26,7 +26,7 @@ from app.models.registration import (
     RegistrationRequest,
     RegistrationRequestStatus,
 )
-from app.models.season import Season, SeasonStatus
+from app.models.season import Season
 from main import app
 
 # ---------------------------------------------------------------------------
@@ -61,14 +61,13 @@ def player(db: Session) -> Player:
 
 @pytest.fixture()
 def open_season(db: Session) -> Season:
-    """Season that is OPEN with an active registration window."""
+    """Season whose status computes to OPEN from current date."""
     s = Season(
         name="2025 Season",
         year=2025,
         registration_open_at=NOW - timedelta(days=1),
         registration_close_at=NOW + timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
+        season_end_date=NOW + timedelta(days=120),
     )
     db.add(s)
     db.commit()
@@ -78,14 +77,13 @@ def open_season(db: Session) -> Season:
 
 @pytest.fixture()
 def closed_season(db: Session) -> Season:
-    """Season whose registration window has already passed."""
+    """Season whose status computes to CLOSED from current date."""
     s = Season(
         name="2024 Season",
         year=2024,
         registration_open_at=NOW - timedelta(days=60),
         registration_close_at=NOW - timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
+        season_end_date=NOW - timedelta(days=5),
     )
     db.add(s)
     db.commit()

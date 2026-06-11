@@ -15,6 +15,7 @@ class SeasonRead(BaseModel):
     registration_close_at: datetime
     season_end_date: datetime | None
     is_locked: bool
+    is_archived: bool
     status: SeasonStatus
     created_at: datetime
 
@@ -42,5 +43,4 @@ class SeasonUpdate(BaseModel):
     registration_open_at: datetime | None = None
     registration_close_at: datetime | None = None
     season_end_date: datetime | None = None
-    # is_locked is managed automatically — not accepted from callers
-    status: SeasonStatus | None = None
+    is_archived: bool | None = None

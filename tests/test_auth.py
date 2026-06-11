@@ -30,7 +30,7 @@ from app.dependencies import CurrentUser, _decode_token, get_current_user
 from app.models.club import Club, ClubStatus
 from app.models.player import Player
 from app.models.registration import RegistrationRequest, RegistrationRequestStatus
-from app.models.season import Season, SeasonStatus
+from app.models.season import Season
 from main import app
 
 # ---------------------------------------------------------------------------
@@ -293,8 +293,6 @@ def test_player_cannot_decide_another_players_registration(
         year=2025,
         registration_open_at=now - timedelta(days=1),
         registration_close_at=now + timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
     )
     db.add_all([club, player, season])
     db.flush()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import traceback
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -16,36 +15,16 @@ from app.services import audit_service, notification_service
 
 logger = get_logger(__name__)
 
-VALID_TRANSITIONS: dict[SeasonStatus, set[SeasonStatus]] = {
-    SeasonStatus.DRAFT: {SeasonStatus.OPEN},
-    SeasonStatus.OPEN: {SeasonStatus.ACTIVE},
-    SeasonStatus.ACTIVE: {SeasonStatus.CLOSED},
-    SeasonStatus.CLOSED: {SeasonStatus.ARCHIVED},
-    SeasonStatus.ARCHIVED: set(),
-}
-
 
 def is_registration_window_open(season: Season) -> bool:
-    """True when season is OPEN and now is within the registration window.
-
-    SQLite returns naive datetimes; PostgreSQL returns tz-aware ones.
-    Normalise by stripping tzinfo when the stored values are naive.
-    """
-    now = datetime.now(tz=UTC)
-    open_at = season.registration_open_at
-    close_at = season.registration_close_at
-    if open_at.tzinfo is None:
-        now = now.replace(tzinfo=None)
-    return season.status == SeasonStatus.OPEN and open_at <= now <= close_at
+    return season.status == SeasonStatus.OPEN
 
 
 def is_roster_locked(season: Season) -> bool:
-    """True when the season is ACTIVE — no roster changes allowed."""
     return season.status == SeasonStatus.ACTIVE
 
 
 def transfers_allowed(season: Season) -> bool:
-    """True when season is CLOSED — clubs can release/invite players."""
     return season.status in (SeasonStatus.CLOSED, SeasonStatus.DRAFT)
 
 
@@ -59,14 +38,7 @@ def get_season_by_id(db: Session, season_id: int) -> Season | None:
 
 
 def _bump_season_cache() -> None:
-    """
-    Invalidate any cached season responses.
-
     # TODO: implement with Redis INCR on a namespace version key.
-    # Until Redis is added to the stack, this is a no-op.
-    # Pattern: every cache key includes `season:v{version}:...`.
-    # Incrementing the version instantly invalidates all season cache entries.
-    """
     pass
 
 
@@ -78,10 +50,10 @@ def create_season(db: Session, data: SeasonCreate, current_user: CurrentUser) ->
             "request_id": request_id_var.get(),
         }
     )
-    season = Season(**data.model_dump(), status=SeasonStatus.DRAFT, is_locked=False)
+    season = Season(**data.model_dump())
     db.add(season)
     try:
-        db.flush()  # get season.id before writing audit / notifications
+        db.flush()
     except IntegrityError:
         db.rollback()
         logger.error(
@@ -125,12 +97,6 @@ def create_season(db: Session, data: SeasonCreate, current_user: CurrentUser) ->
 def update_season(
     db: Session, season: Season, data: SeasonUpdate, current_user: CurrentUser
 ) -> tuple[Season, str | None]:
-    """
-    Returns (updated_season, error_message).
-    error_message is None on success, a string description on invalid transition.
-
-    Writes to AuditLog and notifies club_admins on status or lock-state changes.
-    """
     logger.info(
         {
             "event": "update_season.start",
@@ -139,34 +105,10 @@ def update_season(
         }
     )
     updates = data.model_dump(exclude_unset=True)
-    # is_locked is never accepted from callers — managed automatically below
-    updates.pop("is_locked", None)
-
-    if "status" in updates:
-        new_status = updates["status"]
-        allowed = VALID_TRANSITIONS[season.status]
-        if new_status not in allowed:
-            logger.warning(
-                {
-                    "event": "update_season.invalid_transition",
-                    "season_id": season.id,
-                    "from_status": season.status,
-                    "to_status": new_status,
-                    "request_id": request_id_var.get(),
-                }
-            )
-            return season, (
-                f"Cannot transition from '{season.status}' to '{new_status}'. "
-                f"Allowed: {[s.value for s in allowed] or 'none (terminal state)'}."
-            )
-
-    old_status = season.status
+    was_archived = season.is_archived
 
     for field, value in updates.items():
         setattr(season, field, value)
-
-    # Auto-manage is_locked: True only when season is ACTIVE
-    season.is_locked = season.status == SeasonStatus.ACTIVE
 
     db.flush()
 
@@ -179,15 +121,12 @@ def update_season(
         details=updates,
     )
 
-    # Notify club admins of status changes
-    if "status" in updates and season.status != old_status:
+    if updates.get("is_archived") and not was_archived:
         notification_service.notify_by_role(
             db,
             role="club_admin",
-            event_type="season.status_changed",
-            message=(
-                f"Season '{season.name}' status changed to '{season.status.value}'."
-            ),
+            event_type="season.archived",
+            message=f"Season '{season.name}' ({season.year}) has been archived.",
         )
 
     db.commit()
@@ -209,8 +148,8 @@ def delete_season(
     """
     Permanently delete a season and all associated data.
 
-    Only allowed when the season is DRAFT or ARCHIVED (never when players
-    have active registrations).  Cascades to registration_requests,
+    Only allowed for DRAFT or ARCHIVED seasons (never when players have
+    active registrations).  Cascades to registration_requests,
     player_season_registrations, and club_season_profiles via FK ON DELETE CASCADE.
     """
     if season.status not in (SeasonStatus.DRAFT, SeasonStatus.ARCHIVED):

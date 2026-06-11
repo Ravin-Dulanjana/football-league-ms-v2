@@ -423,6 +423,11 @@ def assign_role(
         return None, "Only a super_admin can change another super_admin's role."
     if new_role == "club_admin" and not new_club_id:
         return None, "club_id is required when assigning the club_admin role."
+    if current_user.role == "club_admin" and new_role == "club_admin":
+        if target.club_id != current_user.club_id:
+            return None, (
+                "You can only assign the club_admin role to members of your own club."
+            )
 
     old_role = target.role
 
@@ -546,6 +551,9 @@ def revoke_governance_role(
     perm_err = _check_role_permission(current_user, role, club_id)
     if perm_err:
         return None, perm_err
+    if current_user.role == "club_admin" and role == "club_admin":
+        if target.club_id != current_user.club_id:
+            return None, "You can only revoke club_admin from members of your own club."
 
     query = select(UserGovernanceRole).where(
         UserGovernanceRole.user_id == target.id,

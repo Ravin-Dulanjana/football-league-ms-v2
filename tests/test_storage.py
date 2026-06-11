@@ -38,7 +38,7 @@ from app.models.registration import (
     RegistrationType,
 )
 from app.models.release import ReleaseDocument
-from app.models.season import Season, SeasonStatus
+from app.models.season import Season
 from app.services import storage
 from main import app
 
@@ -340,8 +340,6 @@ def _active_registration(
         year=2025,
         registration_open_at=NOW - timedelta(days=1),
         registration_close_at=NOW + timedelta(days=30),
-        status=SeasonStatus.OPEN,
-        is_locked=False,
     )
     db.add(season)
     db.flush()
