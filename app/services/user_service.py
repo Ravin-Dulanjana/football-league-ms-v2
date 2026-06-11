@@ -81,13 +81,20 @@ def create_user(
     # Enforce creation hierarchy:
     #   super_admin  → any role
     #   league_admin → league_admin, club_admin, player, club_staff (not super_admin)
-    #   club_admin   → player or club_staff only
+    #   club_admin   → player or club_staff only (club_id auto-injected below)
     role = current_user.role
     target_role = data.role
     if role == "league_admin" and target_role == "super_admin":
         return None, "League admins cannot create super_admin accounts."
     if role == "club_admin" and target_role not in ("player", "club_staff"):
         return None, "Club admins can only create player or club_staff accounts."
+
+    # When a club_admin creates a player or club_staff, auto-assign their club.
+    club_id = data.club_id
+    if role == "club_admin" and club_id is None:
+        club_id = current_user.club_id
+    if role == "club_admin" and target_role == "club_staff" and club_id is None:
+        return None, "Club admins must be linked to a club to create staff accounts."
 
     # Check email is not already taken
     existing = db.execute(
@@ -123,7 +130,7 @@ def create_user(
         email=data.email,
         temporary_password=data.temporary_password,
         role=data.role,
-        club_id=data.club_id,
+        club_id=club_id,
         player_id=player_id,
     )
     if cognito_sub is None:
@@ -138,7 +145,7 @@ def create_user(
         email=data.email,
         role=data.role,
         member_type=member_type,
-        club_id=data.club_id,
+        club_id=club_id,
         player_id=player_id,
         is_active=True,
         is_deleted=False,
@@ -157,7 +164,7 @@ def create_user(
             "email": data.email,
             "role": data.role,
             "member_type": member_type,
-            "club_id": data.club_id,
+            "club_id": club_id,
         },
     )
     db.commit()

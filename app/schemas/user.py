@@ -86,9 +86,10 @@ class UserCreate(BaseModel):
                     "when role=player or member_type=player "
                     f"(missing: {', '.join(missing)})"
                 )
-        # club_id required for club_admin and club_staff
-        if self.role in ("club_admin", "club_staff") and not self.club_id:
-            raise ValueError(f"club_id is required when role={self.role}")
+        # club_id required for club_admin (for club_staff it may be injected
+        # server-side when the creator is a club_admin)
+        if self.role == "club_admin" and not self.club_id:
+            raise ValueError("club_id is required when role=club_admin")
         return self
 
 
