@@ -31,6 +31,8 @@ import uuid
 from typing import Any
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import HTTPException, status
 
 from app.config import settings
 
@@ -95,24 +97,30 @@ def generate_upload_url(
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
     key = f"{folder}/{uuid.uuid4()}.{ext}"
 
+    if not settings.s3_bucket_name:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "File storage is not configured on this server.",
+        )
+
     client = _s3_client()
-    response = client.generate_presigned_post(
-        Bucket=settings.s3_bucket_name,
-        Key=key,
-        Fields={"Content-Type": content_type},
-        Conditions=[
-            # Lock the key — prevents the client from altering the key
-            # field in the form to redirect the upload to a different path.
-            {"key": key},
-            # Lock the Content-Type — prevents mime-type confusion attacks.
-            {"Content-Type": content_type},
-            # Enforce a max file size of 10 MB.
-            # Without this, an attacker with a valid URL could upload
-            # gigabytes and run up your S3 bill.
-            ["content-length-range", 1, 10 * 1024 * 1024],
-        ],
-        ExpiresIn=900,  # 15 minutes — enough for a typical user session
-    )
+    try:
+        response = client.generate_presigned_post(
+            Bucket=settings.s3_bucket_name,
+            Key=key,
+            Fields={"Content-Type": content_type},
+            Conditions=[
+                {"key": key},
+                {"Content-Type": content_type},
+                ["content-length-range", 1, 10 * 1024 * 1024],
+            ],
+            ExpiresIn=900,
+        )
+    except (ClientError, BotoCoreError) as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Storage service error: {exc}",
+        ) from exc
 
     return {
         "url": response["url"],

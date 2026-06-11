@@ -38,14 +38,24 @@ async function handler(req: NextRequest): Promise<NextResponse> {
     body = await req.text();
   }
 
-  const upstream = await fetch(targetUrl, {
-    method: req.method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: body || undefined,
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: body || undefined,
+    });
+  } catch (err) {
+    // Network error, connection refused, DNS failure, etc.
+    console.error("[proxy] upstream fetch failed:", err);
+    return NextResponse.json(
+      { detail: "Backend unreachable" },
+      { status: 502 }
+    );
+  }
 
   // For CSV/text responses (audit log export, reports), stream as text.
   const contentType = upstream.headers.get("content-type") ?? "";
@@ -60,9 +70,23 @@ async function handler(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // JSON responses
-  const data = upstream.status === 204 ? null : await upstream.json();
-  return NextResponse.json(data, { status: upstream.status });
+  // JSON responses — fall back gracefully if the body is not valid JSON
+  // (e.g. backend crashed before writing headers, or returned an HTML error page).
+  if (upstream.status === 204) {
+    return new NextResponse(null, { status: 204 });
+  }
+
+  const raw = await upstream.text();
+  try {
+    const data = JSON.parse(raw);
+    return NextResponse.json(data, { status: upstream.status });
+  } catch {
+    console.error("[proxy] non-JSON response from backend:", raw.slice(0, 200));
+    return NextResponse.json(
+      { detail: raw || "Unexpected server error" },
+      { status: upstream.status || 500 }
+    );
+  }
 }
 
 export const GET = handler;
