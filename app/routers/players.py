@@ -53,12 +53,51 @@ def update_player(
     player_id: int,
     data: PlayerUpdate,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(require_role("super_admin", "league_admin", "club_admin")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> Player:
+    """
+    Update a player profile.
+
+    Admins (super_admin, league_admin, club_admin) may update any player.
+    A player may update their own profile (identified by current_user.player_id).
+    """
+    is_admin = current_user.role in ("super_admin", "league_admin", "club_admin")
+    is_own_profile = current_user.player_id == player_id
+    if not is_admin and not is_own_profile:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You can only update your own player profile.",
+        )
     player = player_service.get_player_by_id(db, player_id)
     if player is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Player not found.")
     return player_service.update_player(db, player, data)
+
+
+@router.post(
+    "/me/photo-upload-url/",
+    response_model=UploadUrlResponse,
+    summary="Get a pre-signed URL to upload your own profile photo",
+)
+def get_my_photo_upload_url(
+    filename: str,
+    content_type: str = "image/jpeg",
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """
+    Get a pre-signed URL to upload the current user's own profile photo.
+    The user must have a linked player profile (player_id is not null).
+    """
+    if not current_user.player_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No player profile linked to your account.",
+        )
+    return storage.generate_upload_url(
+        folder=f"players/{current_user.player_id}/photos",
+        filename=filename,
+        content_type=content_type,
+    )
 
 
 @router.post(
