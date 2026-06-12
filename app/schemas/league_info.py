@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, computed_field
 
-from app.config import settings
+from app.services import storage
 
 
 class LeagueInfoRead(BaseModel):
@@ -28,9 +28,7 @@ class LeagueInfoRead(BaseModel):
     def logo_url(self) -> str | None:
         if not self.logo_key:
             return None
-        if not settings.cloudfront_domain:
-            return self.logo_key
-        return f"https://{settings.cloudfront_domain}/{self.logo_key}"
+        return storage.get_file_url(self.logo_key)
 
 
 class LeagueInfoUpdate(BaseModel):

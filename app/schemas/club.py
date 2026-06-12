@@ -4,8 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, computed_field
 
-from app.config import settings
 from app.models.club import ClubStatus
+from app.services import storage
 
 
 class ClubRead(BaseModel):
@@ -31,17 +31,14 @@ class ClubRead(BaseModel):
     @property
     def logo_url(self) -> str | None:
         """
-        Build the CloudFront URL from the stored S3 object key.
+        Build the public URL from the stored S3 object key via storage.get_file_url.
 
         Returns None if no logo has been uploaded.
-        Returns the raw key if CLOUDFRONT_DOMAIN is not configured
-        (local development without AWS).
+        Falls back to a direct S3 URL when CLOUDFRONT_DOMAIN is not configured.
         """
         if not self.logo_key:
             return None
-        if not settings.cloudfront_domain:
-            return self.logo_key  # local dev fallback
-        return f"https://{settings.cloudfront_domain}/{self.logo_key}"
+        return storage.get_file_url(self.logo_key)
 
 
 class ClubCreate(BaseModel):

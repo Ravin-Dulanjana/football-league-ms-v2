@@ -4,8 +4,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, computed_field
 
-from app.config import settings
 from app.models.player import PlayerStatus
+from app.services import storage
 
 
 class PlayerRead(BaseModel):
@@ -26,16 +26,14 @@ class PlayerRead(BaseModel):
     @property
     def photo_url(self) -> str | None:
         """
-        Build the CloudFront URL from the stored S3 object key.
+        Build the public URL from the stored S3 object key via storage.get_file_url.
 
         Returns None if no photo has been uploaded.
-        Returns the raw key if CLOUDFRONT_DOMAIN is not configured.
+        Falls back to a direct S3 URL when CLOUDFRONT_DOMAIN is not configured.
         """
         if not self.photo_key:
             return None
-        if not settings.cloudfront_domain:
-            return self.photo_key
-        return f"https://{settings.cloudfront_domain}/{self.photo_key}"
+        return storage.get_file_url(self.photo_key)
 
 
 class PlayerCreate(BaseModel):

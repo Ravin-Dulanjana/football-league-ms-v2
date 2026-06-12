@@ -139,27 +139,42 @@ def generate_upload_url(
 
 def get_file_url(object_key: str) -> str:
     """
-    Build the CloudFront URL for serving a stored S3 object.
+    Build the public URL for serving a stored S3 object.
 
-    WHY CLOUDFRONT (not s3.amazonaws.com):
-      - The S3 bucket is private.  Direct bucket URLs return 403.
-      - CloudFront authenticates to S3 via OAC and caches the response
-        at the nearest edge location.
-
-    If cloudfront_domain is not configured (local development without
-    AWS), returns the raw key so nothing breaks silently.
+    Priority:
+      1. CloudFront  — if CLOUDFRONT_DOMAIN is set (recommended for production).
+         The bucket should be private; CloudFront authenticates via OAC.
+      2. Direct S3   — if S3_BUCKET_NAME is set but CLOUDFRONT_DOMAIN is not.
+         Requires the bucket to have a public GetObject bucket policy.
+      3. Raw key     — last resort; local dev with no AWS config at all.
 
     Args:
         object_key: S3 object key stored in the database,
                     e.g. "clubs/logos/a1b2c3.jpg"
 
-    Returns:
-        "https://d1abc2.cloudfront.net/clubs/logos/a1b2c3.jpg"
+    Returns one of:
+        "https://d1abc2.cloudfront.net/clubs/logos/a1b2c3.jpg"          (CF)
+        "https://bucket.s3.ap-southeast-1.amazonaws.com/…/a1b2c3.jpg"  (S3)
     """
-    if not settings.cloudfront_domain:
-        # Not configured — return the key itself so local dev doesn't crash.
-        return object_key
-    return f"https://{settings.cloudfront_domain}/{object_key}"
+    domain = settings.cloudfront_domain.strip()
+    # Guard: strip accidental https:// prefix in env var
+    for prefix in ("https://", "http://"):
+        if domain.startswith(prefix):
+            domain = domain[len(prefix) :]
+
+    if domain:
+        return f"https://{domain}/{object_key}"
+
+    # No CloudFront — fall back to a direct virtual-hosted S3 URL.
+    # Requires the bucket to allow public GetObject (see deployment docs).
+    if settings.s3_bucket_name:
+        region = settings.aws_region or "us-east-1"
+        return (
+            f"https://{settings.s3_bucket_name}.s3.{region}.amazonaws.com/{object_key}"
+        )
+
+    # No AWS at all — local dev only, return raw key so nothing crashes.
+    return object_key
 
 
 def delete_file(object_key: str) -> None:
