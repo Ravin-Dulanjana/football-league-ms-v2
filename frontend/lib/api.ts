@@ -180,7 +180,8 @@ export const clubsApi = {
     apiFetch<ClubRead>(`/clubs/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   logoUploadUrl: (clubId: number, filename: string, contentType = "image/jpeg") =>
     apiFetch<UploadUrlResponse>(
-      `/clubs/${clubId}/logo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`
+      `/clubs/${clubId}/logo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
+      { method: "POST" }
     ),
 };
 
@@ -460,6 +461,7 @@ export const leagueInfoApi = {
     }),
   logoUploadUrl: (filename: string, contentType = "image/jpeg") =>
     apiFetch<UploadUrlResponse>(
-      `/league-info/logo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`
+      `/league-info/logo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
+      { method: "POST" }
     ),
 };
