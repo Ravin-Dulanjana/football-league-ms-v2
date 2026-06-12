@@ -167,13 +167,45 @@ def test_generate_upload_url_conditions_include_size_limit(
 
 def test_get_file_url_builds_cloudfront_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    get_file_url should prepend the CloudFront domain to the S3 key.
+    get_file_url should prepend the CloudFront domain to the S3 key
+    when USE_PRESIGNED_URLS is False (default).
     """
     monkeypatch.setattr(storage.settings, "cloudfront_domain", "d1abc2.cloudfront.net")
+    monkeypatch.setattr(storage.settings, "use_presigned_urls", False)
 
     url = storage.get_file_url("clubs/logos/uuid.jpg")
 
     assert url == "https://d1abc2.cloudfront.net/clubs/logos/uuid.jpg"
+
+
+def test_get_file_url_returns_presigned_url_when_flag_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    When USE_PRESIGNED_URLS=True, get_file_url should return a time-limited
+    S3 presigned GET URL regardless of the CloudFront domain setting.
+    This allows images to load from a fully private bucket while CloudFront's
+    bucket policy is not yet configured.
+    """
+    monkeypatch.setattr(storage.settings, "use_presigned_urls", True)
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "my-test-bucket")
+    monkeypatch.setattr(storage.settings, "aws_region", "ap-southeast-1")
+    monkeypatch.setattr(storage.settings, "cloudfront_domain", "d1abc2.cloudfront.net")
+
+    fake_presigned = "https://my-test-bucket.s3.ap-southeast-1.amazonaws.com/clubs/logos/uuid.jpg?X-Amz-Signature=abc"
+    mock_client = MagicMock()
+    mock_client.generate_presigned_url.return_value = fake_presigned
+
+    with patch("app.services.storage.boto3") as mock_boto3:
+        mock_boto3.client.return_value = mock_client
+        url = storage.get_file_url("clubs/logos/uuid.jpg")
+
+    assert url == fake_presigned
+    mock_client.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={"Bucket": "my-test-bucket", "Key": "clubs/logos/uuid.jpg"},
+        ExpiresIn=storage.settings.presigned_url_expiry_seconds,
+    )
 
 
 def test_get_file_url_falls_back_to_s3_url_when_cloudfront_not_configured(
