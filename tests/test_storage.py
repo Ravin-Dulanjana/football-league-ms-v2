@@ -176,14 +176,51 @@ def test_get_file_url_builds_cloudfront_url(monkeypatch: pytest.MonkeyPatch) -> 
     assert url == "https://d1abc2.cloudfront.net/clubs/logos/uuid.jpg"
 
 
-def test_get_file_url_returns_key_when_domain_not_configured(
+def test_get_file_url_falls_back_to_s3_url_when_cloudfront_not_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    If CLOUDFRONT_DOMAIN is not set (local development), get_file_url
-    should return the raw key rather than crashing or returning a broken URL.
+    If CLOUDFRONT_DOMAIN is not set but S3_BUCKET_NAME is, get_file_url
+    should return a direct virtual-hosted S3 URL so images are loadable
+    in the browser (requires the bucket to allow public GetObject).
     """
     monkeypatch.setattr(storage.settings, "cloudfront_domain", "")
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "my-test-bucket")
+    monkeypatch.setattr(storage.settings, "aws_region", "ap-southeast-1")
+
+    result = storage.get_file_url("clubs/logos/uuid.jpg")
+
+    assert (
+        result
+        == "https://my-test-bucket.s3.ap-southeast-1.amazonaws.com/clubs/logos/uuid.jpg"
+    )
+
+
+def test_get_file_url_strips_https_prefix_from_cloudfront_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    If CLOUDFRONT_DOMAIN was set with an https:// prefix by mistake,
+    get_file_url should still produce a valid URL without a double prefix.
+    """
+    monkeypatch.setattr(
+        storage.settings, "cloudfront_domain", "https://d1abc2.cloudfront.net"
+    )
+
+    url = storage.get_file_url("clubs/logos/uuid.jpg")
+
+    assert url == "https://d1abc2.cloudfront.net/clubs/logos/uuid.jpg"
+
+
+def test_get_file_url_returns_raw_key_when_no_aws_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    If neither CLOUDFRONT_DOMAIN nor S3_BUCKET_NAME is set (pure local dev),
+    get_file_url should return the raw key so nothing crashes.
+    """
+    monkeypatch.setattr(storage.settings, "cloudfront_domain", "")
+    monkeypatch.setattr(storage.settings, "s3_bucket_name", "")
 
     result = storage.get_file_url("clubs/logos/uuid.jpg")
 
