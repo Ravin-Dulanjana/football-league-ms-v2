@@ -104,10 +104,14 @@ def update_season(
             "request_id": request_id_var.get(),
         }
     )
-    updates = data.model_dump(exclude_unset=True)
+    # Two views of the same update:
+    # - orm_updates: Python-native types (datetime objects) for setattr / SQLAlchemy
+    # - audit_updates: JSON-safe types (ISO strings for datetimes) for the audit log
+    orm_updates = data.model_dump(exclude_unset=True)
+    audit_updates = data.model_dump(exclude_unset=True, mode="json")
     was_archived = season.is_archived
 
-    for field, value in updates.items():
+    for field, value in orm_updates.items():
         setattr(season, field, value)
 
     db.flush()
@@ -118,10 +122,10 @@ def update_season(
         action="season.update",
         entity_type="Season",
         entity_id=season.id,
-        details=updates,
+        details=audit_updates,
     )
 
-    if updates.get("is_archived") and not was_archived:
+    if audit_updates.get("is_archived") and not was_archived:
         notification_service.notify_by_role(
             db,
             role="club_admin",
