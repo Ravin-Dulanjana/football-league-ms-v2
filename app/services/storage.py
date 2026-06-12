@@ -139,41 +139,52 @@ def generate_upload_url(
 
 def get_file_url(object_key: str) -> str:
     """
-    Build the public URL for serving a stored S3 object.
+    Build the URL for serving a stored S3 object.
 
     Priority:
-      1. CloudFront  — if CLOUDFRONT_DOMAIN is set (recommended for production).
-         The bucket should be private; CloudFront authenticates via OAC.
-      2. Direct S3   — if S3_BUCKET_NAME is set but CLOUDFRONT_DOMAIN is not.
-         Requires the bucket to have a public GetObject bucket policy.
-      3. Raw key     — last resort; local dev with no AWS config at all.
+      1. Presigned GET URL — if USE_PRESIGNED_URLS=true in .env.
+         Works with a fully private bucket; the EC2 IAM role signs the URL.
+         URLs expire after PRESIGNED_URL_EXPIRY_SECONDS (default 3600).
+         Use this when CloudFront's bucket policy is not yet configured.
+      2. CloudFront URL   — if CLOUDFRONT_DOMAIN is set.
+         Requires the S3 bucket policy to allow the CloudFront OAC principal.
+      3. Direct S3 URL    — fallback when only S3_BUCKET_NAME is set.
+         Requires the bucket to allow public GetObject.
+      4. Raw key          — last resort for local dev with no AWS config.
 
     Args:
         object_key: S3 object key stored in the database,
                     e.g. "clubs/logos/a1b2c3.jpg"
-
-    Returns one of:
-        "https://d1abc2.cloudfront.net/clubs/logos/a1b2c3.jpg"          (CF)
-        "https://bucket.s3.ap-southeast-1.amazonaws.com/…/a1b2c3.jpg"  (S3)
     """
+    # Option 1: presigned GET — works with private bucket, no CloudFront needed
+    if settings.use_presigned_urls and settings.s3_bucket_name:
+        try:
+            client = _s3_client()
+            presigned: str = client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": settings.s3_bucket_name, "Key": object_key},
+                ExpiresIn=settings.presigned_url_expiry_seconds,
+            )
+            return presigned
+        except Exception:
+            pass  # fall through to CloudFront / S3 direct
+
+    # Option 2: CloudFront (bucket policy must allow OAC principal)
     domain = settings.cloudfront_domain.strip()
-    # Guard: strip accidental https:// prefix in env var
     for prefix in ("https://", "http://"):
         if domain.startswith(prefix):
             domain = domain[len(prefix) :]
-
     if domain:
         return f"https://{domain}/{object_key}"
 
-    # No CloudFront — fall back to a direct virtual-hosted S3 URL.
-    # Requires the bucket to allow public GetObject (see deployment docs).
+    # Option 3: direct virtual-hosted S3 URL (public bucket required)
     if settings.s3_bucket_name:
         region = settings.aws_region or "us-east-1"
         return (
             f"https://{settings.s3_bucket_name}.s3.{region}.amazonaws.com/{object_key}"
         )
 
-    # No AWS at all — local dev only, return raw key so nothing crashes.
+    # Option 4: local dev fallback — raw key
     return object_key
 
 

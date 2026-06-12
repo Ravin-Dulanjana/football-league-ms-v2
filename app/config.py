@@ -19,12 +19,20 @@ class Settings(BaseSettings):
     #   Example: "d1abc2xyz3.cloudfront.net"
     #   get_file_url() builds: "https://<domain>/<key>"
     #
+    # USE_PRESIGNED_URLS: when True, get_file_url() returns a time-limited
+    #   S3 presigned GET URL instead of a CloudFront/public URL.
+    #   Use this while CloudFront's bucket policy is not yet configured.
+    #   The EC2 IAM role must have s3:GetObject on the bucket.
+    #   URL lifetime is controlled by PRESIGNED_URL_EXPIRY_SECONDS.
+    #
     # AWS_REGION: the region the S3 bucket lives in.
     #   Must match the region the EC2 instance is running in to avoid
     #   cross-region transfer costs and reduce latency.
     # ------------------------------------------------------------------
     s3_bucket_name: str = ""
     cloudfront_domain: str = ""
+    use_presigned_urls: bool = False
+    presigned_url_expiry_seconds: int = 3600
     aws_region: str = "ap-southeast-1"
 
     # ------------------------------------------------------------------
