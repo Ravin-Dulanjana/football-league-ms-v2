@@ -831,10 +831,18 @@ def _send_temp_password_email(email: str, temp_password: str) -> None:
     """
     if not settings.cognito_user_pool_id:
         return  # dev mode, skip
+    if not settings.ses_sender_email:
+        logger.warning(
+            {
+                "event": "ses.send_temp_password.skipped",
+                "reason": "SES_SENDER_EMAIL not set",
+            }
+        )
+        return
     try:
         ses = boto3.client("ses", region_name=settings.aws_region)
         ses.send_email(
-            Source="noreply@football-league.example.com",
+            Source=settings.ses_sender_email,
             Destination={"ToAddresses": [email]},
             Message={
                 "Subject": {"Data": "Your temporary password"},

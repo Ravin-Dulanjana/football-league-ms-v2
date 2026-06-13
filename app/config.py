@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # Derived from pool ID: https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json
     # Stored explicitly so it can be overridden in tests without a real pool.
     cognito_jwks_url: str = ""
+    # SES — must be a verified identity (email address or domain) in SES.
+    # When empty, password-reset emails are skipped silently (dev/test mode).
+    ses_sender_email: str = ""
 
     # ------------------------------------------------------------------
     # Phase 7 — CloudWatch observability
