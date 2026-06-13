@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ChevronRight, Filter, MoreHorizontal, Plus, RefreshCw, Trash2, Users, X } from "lucide-react";
+import { ChevronRight, Filter, MoreHorizontal, Plus, RefreshCw, Search, Trash2, Users, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -539,6 +539,7 @@ export default function UsersPage() {
     label: string;
   } | null>(null);
   const [clubFilter, setClubFilter] = useState<number | "all">("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const queryClient = useQueryClient();
   const { isSuperAdmin, isLeagueLevel, isAnyAdmin, user: currentUser } = useCurrentUser();
 
@@ -602,10 +603,17 @@ export default function UsersPage() {
   const refetch = tab === "active" ? refetchActive : refetchDeleted;
   const rawUsers = tab === "active" ? activeUsers : deletedUsers;
 
-  // Client-side club filter
-  const users = clubFilter === "all"
-    ? rawUsers
-    : rawUsers?.filter((u) => u.club_id === clubFilter);
+  // Client-side filters
+  const q = searchQuery.trim().toLowerCase();
+  const users = rawUsers?.filter((u) => {
+    if (clubFilter !== "all" && u.club_id !== clubFilter) return false;
+    if (q) {
+      const matchEmail = u.email.toLowerCase().includes(q);
+      const matchName = u.full_name?.toLowerCase().includes(q) ?? false;
+      if (!matchEmail && !matchName) return false;
+    }
+    return true;
+  });
 
   // Which roles can the current user manage?
   const canManageRoles = isAnyAdmin;
@@ -645,37 +653,58 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Club filter */}
-      {clubs && clubs.length > 0 && tab === "active" && (
-        <div className="flex items-center gap-2 mb-4">
-          <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
-          <Select
-            value={clubFilter === "all" ? "all" : String(clubFilter)}
-            onValueChange={(v) => setClubFilter(v === "all" ? "all" : Number(v))}
-          >
-            <SelectTrigger className="w-52 h-8 text-sm">
-              <SelectValue placeholder="All clubs" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All clubs</SelectItem>
-              {clubs.map((c) => (
-                <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {clubFilter !== "all" && (
-            <button
-              onClick={() => setClubFilter("all")}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3 w-3" /> Clear
-            </button>
+      {/* Filters */}
+      {tab === "active" && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name or email…"
+              className="pl-8 h-8 w-56 text-sm"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          {clubs && clubs.length > 0 && (
+            <>
+              <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Select
+                value={clubFilter === "all" ? "all" : String(clubFilter)}
+                onValueChange={(v) => setClubFilter(v === "all" ? "all" : Number(v))}
+              >
+                <SelectTrigger className="w-52 h-8 text-sm">
+                  <SelectValue placeholder="All clubs" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All clubs</SelectItem>
+                  {clubs.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {clubFilter !== "all" && (
+                <button
+                  onClick={() => setClubFilter("all")}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" /> Clear
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
 
       {isLoading ? (
-        <DataTableSkeleton columns={6} />
+        <DataTableSkeleton columns={7} />
       ) : error ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
       ) : !users?.length ? (
@@ -694,6 +723,7 @@ export default function UsersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Email</TableHead>
+                <TableHead>Name</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Club</TableHead>
                 <TableHead>Status</TableHead>
@@ -721,6 +751,9 @@ export default function UsersPage() {
                           </span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {user.full_name ?? "—"}
                     </TableCell>
                     <TableCell><RoleCell user={user} /></TableCell>
                     <TableCell className="text-sm text-muted-foreground">

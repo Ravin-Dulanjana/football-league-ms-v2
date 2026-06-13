@@ -54,6 +54,8 @@ class UserRead(BaseModel):
     last_login_at: datetime | None
     # All active governance roles (club_admin + league_admin can coexist, etc.)
     governance_roles: list[GovernanceRoleRead] = []
+    # Populated from linked Player profile when member_type == "player"
+    full_name: str | None = None
 
     model_config = {"from_attributes": True}
 
