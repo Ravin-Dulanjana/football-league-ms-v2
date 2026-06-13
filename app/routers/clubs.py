@@ -112,3 +112,32 @@ def get_logo_upload_url(
         filename=filename,
         content_type=content_type,
     )
+
+
+@router.post(
+    "/{club_id}/cover-upload-url/",
+    response_model=UploadUrlResponse,
+    summary="Get a pre-signed URL to upload a club cover photo directly to S3",
+)
+def get_cover_upload_url(
+    club_id: int,
+    filename: str,
+    content_type: str = "image/jpeg",
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(
+        require_role("super_admin", "league_admin", "club_admin")
+    ),
+) -> dict[str, object]:
+    club = club_service.get_club_by_id(db, club_id)
+    if club is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found.")
+    if current_user.role == "club_admin" and current_user.club_id != club_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Club admins can only update their own club's cover photo.",
+        )
+    return storage.generate_upload_url(
+        folder=f"clubs/{club_id}/covers",
+        filename=filename,
+        content_type=content_type,
+    )

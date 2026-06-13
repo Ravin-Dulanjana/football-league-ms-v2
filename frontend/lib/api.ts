@@ -183,6 +183,11 @@ export const clubsApi = {
       `/clubs/${clubId}/logo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
       { method: "POST" }
     ),
+  coverUploadUrl: (clubId: number, filename: string, contentType = "image/jpeg") =>
+    apiFetch<UploadUrlResponse>(
+      `/clubs/${clubId}/cover-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
+      { method: "POST" }
+    ),
 };
 
 // ---------------------------------------------------------------------------
