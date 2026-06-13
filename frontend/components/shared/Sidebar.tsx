@@ -158,9 +158,8 @@ export function Sidebar() {
         />
         <div className="leading-tight min-w-0">
           <p className="font-serif font-semibold text-sm text-foreground tracking-tight truncate">
-            Wattala
+            Wattala Football League
           </p>
-          <p className="text-xs text-muted-foreground truncate">Management Office</p>
         </div>
       </Link>
 
