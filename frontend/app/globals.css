@@ -4,41 +4,44 @@
 
 @layer base {
   :root {
-    /* Light mode — Wattala Football League navy + gold */
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    /* Boardroom — warm paper light theme */
+    --background: 40 33% 94%;    /* #F4F1E9 warm paper            */
+    --foreground: 221 46% 16%;   /* #16223B navy ink              */
 
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card: 40 60% 99%;          /* #FFFEFB warm white            */
+    --card-foreground: 221 46% 16%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 221 46% 16%;
 
-    /* WFL navy: hsl(220 57% 24%) = #1a3563 */
-    --primary: 220 57% 24%;
+    --primary: 217 60% 26%;      /* #1B3A6B WFL navy              */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 40 30% 92%;     /* #EFEBE0 paper-2 hover/inset   */
+    --secondary-foreground: 221 46% 16%;
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 40 30% 92%;
+    --muted-foreground: 222 14% 43%;  /* #5E677C */
 
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --accent: 40 30% 92%;
+    --accent-foreground: 221 46% 16%;
 
-    --destructive: 0 84% 60%;
+    --destructive: 6 50% 47%;    /* #B4453C refined red           */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 220 57% 24%;
+    --border: 40 25% 87%;        /* #E7E1D3 warm hairline         */
+    --input: 40 25% 87%;
+    --ring: 217 60% 26%;
 
-    --radius: 0.5rem;
+    --radius: 0.9rem;
+
+    /* Gold accent */
+    --gold: 43 49% 50%;          /* #BE9B43 champagne gold        */
+    --gold-soft: 43 55% 89%;     /* #F3EBD3 gold tint for chips   */
   }
 
   .dark {
-    /* Dark mode — deep slate base */
+    /* Keep existing dark mode — out of scope for this pass */
     --background: 222 47% 7%;
     --foreground: 210 40% 98%;
 
@@ -48,7 +51,6 @@
     --popover: 222 47% 10%;
     --popover-foreground: 210 40% 98%;
 
-    /* Lighter navy for dark backgrounds */
     --primary: 220 57% 55%;
     --primary-foreground: 0 0% 100%;
 
@@ -67,6 +69,9 @@
     --border: 217 33% 17%;
     --input: 217 33% 17%;
     --ring: 220 57% 55%;
+
+    --gold: 43 49% 50%;
+    --gold-soft: 43 20% 20%;
   }
 }
 
@@ -87,12 +92,81 @@
   }
 }
 
+@layer components {
+  /* Eyebrow label — tiny uppercase gold caption above titles */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: hsl(var(--gold));
+  }
+
+  /* Serif display number / title */
+  .display {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* Card surface */
+  .card-surface {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    box-shadow: 0 1px 2px rgba(20, 30, 55, 0.04),
+      0 10px 30px -12px rgba(20, 30, 55, 0.10);
+  }
+
+  /* Filter chip */
+  .chip {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 9px;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    font: 600 12.5px/1 var(--font-sans);
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+
+  .chip[data-active="true"],
+  .chip.chip-active {
+    background: hsl(var(--primary));
+    color: #fff;
+    border-color: hsl(var(--primary));
+  }
+
+  /* Tab bar — gold underline on active */
+  .tab {
+    padding: 10px 14px;
+    font: 600 13px/1 var(--font-sans);
+    color: hsl(var(--muted-foreground));
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.1s;
+    white-space: nowrap;
+  }
+
+  .tab[data-active="true"],
+  .tab.tab-active {
+    color: hsl(var(--primary));
+    border-bottom-color: hsl(var(--gold));
+  }
+}
+
 @layer utilities {
   .table-row-hover {
-    @apply hover:bg-muted/50 transition-colors duration-100;
+    @apply hover:bg-secondary transition-colors duration-100;
   }
 
   .focus-ring {
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  }
+
+  .font-serif {
+    font-family: var(--font-serif);
   }
 }

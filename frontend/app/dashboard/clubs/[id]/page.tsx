@@ -13,6 +13,7 @@ import {
   Camera,
   CheckCircle2,
   ClipboardCheck,
+  ImageIcon,
   Mail,
   Pencil,
   Phone,
@@ -447,6 +448,8 @@ export default function ClubDetailPage() {
   const [addStaffOpen, setAddStaffOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteStaffTarget, setDeleteStaffTarget] = useState<ClubStaffRead | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
   const queryClient = useQueryClient();
   const { user, isSuperAdmin } = useCurrentUser();
 
@@ -573,6 +576,33 @@ export default function ClubDetailPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCoverUploading(true);
+    try {
+      const { url, fields, key } = await clubsApi.coverUploadUrl(
+        clubId,
+        file.name,
+        file.type || "image/jpeg"
+      );
+      const formData = new FormData();
+      Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
+      formData.append("file", file);
+      const s3Res = await fetch(url, { method: "POST", body: formData });
+      if (!s3Res.ok) throw new Error("Upload to S3 failed");
+      await clubsApi.update(clubId, { cover_key: key });
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      toast.success("Cover photo updated");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setCoverUploading(false);
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    }
+  };
+
   if (clubLoading) {
     return (
       <div className="p-6 space-y-4">
@@ -601,78 +631,114 @@ export default function ClubDetailPage() {
         Clubs
       </button>
 
-      {/* Club header card */}
-      <div className="rounded-xl border border-border bg-card p-6">
-        <div className="flex items-start gap-5">
-          {/* Logo / initials */}
-          <div className="flex items-center justify-center w-16 h-16 rounded-xl bg-primary/10 text-primary font-bold text-xl shrink-0">
-            {club.logo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={club.logo_url}
-                alt={club.name}
-                className="w-full h-full rounded-xl object-cover"
-              />
-            ) : (
-              club.code.slice(0, 3)
-            )}
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-semibold">{club.name}</h1>
-              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-muted text-muted-foreground">
-                {club.code}
-              </span>
-              <StatusBadge status={club.status} />
+      {/* Club header card with cover photo */}
+      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-card">
+        {/* Cover photo banner */}
+        <div className="relative h-44 sm:h-52 bg-secondary">
+          {club.cover_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={club.cover_url}
+              alt={`${club.name} cover`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground/40">
+              <ImageIcon className="h-8 w-8" />
+              <span className="text-xs font-medium">Club cover photo</span>
             </div>
-            {club.short_name && (
-              <p className="text-sm text-muted-foreground mt-0.5">{club.short_name}</p>
-            )}
-            {club.email && (
-              <p className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1.5">
-                <Mail className="h-3.5 w-3.5" />
-                {club.email}
-              </p>
-            )}
-            {club.phone_number && (
-              <p className="flex items-center gap-1.5 text-sm text-muted-foreground mt-0.5">
-                <Phone className="h-3.5 w-3.5" />
-                {club.phone_number}
-              </p>
-            )}
-          </div>
+          )}
+          {/* Change cover button */}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => coverInputRef.current?.click()}
+              disabled={coverUploading}
+              className="absolute top-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-black/40 backdrop-blur text-white text-xs font-semibold hover:bg-black/60 disabled:opacity-50 transition-colors"
+            >
+              <Camera className="h-3.5 w-3.5" />
+              {coverUploading ? "Uploading…" : "Change cover"}
+            </button>
+          )}
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleCoverChange}
+          />
+        </div>
 
-          <div className="flex flex-col items-end gap-2 shrink-0">
-            {club.established_year && (
-              <p className="text-xs text-muted-foreground">Est. {club.established_year}</p>
-            )}
+        {/* Logo + info row — logo overlaps cover bottom */}
+        <div className="px-5 pb-5">
+          <div className="flex items-end gap-4 -mt-8 sm:-mt-10 mb-4">
+            {/* Logo overlapping cover */}
+            <div className="relative shrink-0">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-primary/10 text-primary font-bold text-xl flex items-center justify-center overflow-hidden border-4 border-card shadow-card">
+                {club.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={club.logo_url}
+                    alt={club.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-lg">{club.code.slice(0, 3)}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 min-w-0 pb-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-serif text-xl font-semibold">{club.name}</h1>
+                <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-secondary text-muted-foreground">
+                  {club.code}
+                </span>
+                <StatusBadge status={club.status} />
+              </div>
+              {club.established_year && (
+                <p className="eyebrow mt-0.5">Est. {club.established_year}</p>
+              )}
+            </div>
             {canEdit && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setEditOpen(true)}
-                className="gap-1.5"
+                className="shrink-0 mb-1"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Edit club
               </Button>
             )}
           </div>
+
+          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+            {club.email && (
+              <span className="flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5" />
+                {club.email}
+              </span>
+            )}
+            {club.phone_number && (
+              <span className="flex items-center gap-1.5">
+                <Phone className="h-3.5 w-3.5" />
+                {club.phone_number}
+              </span>
+            )}
+            {club.short_name && (
+              <span className="text-muted-foreground">{club.short_name}</span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Segment navigation */}
-      <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+      <div className="flex border-b border-border overflow-x-auto">
         {SEGMENTS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setSegment(id)}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-              segment === id
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`tab flex items-center gap-2 ${segment === id ? "tab-active" : ""}`}
           >
             <Icon className="h-3.5 w-3.5" />
             {label}

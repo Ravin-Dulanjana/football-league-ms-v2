@@ -102,6 +102,8 @@ export interface ClubRead {
   phone_number: string | null;
   logo_key: string | null;
   logo_url: string | null;
+  cover_key: string | null;
+  cover_url: string | null;
   status: ClubStatus;
   established_year: number | null;
   president_name: string | null;
@@ -130,6 +132,7 @@ export interface ClubUpdate {
   email?: string;
   phone_number?: string;
   logo_key?: string;
+  cover_key?: string;
   status?: ClubStatus;
   established_year?: number | null;
   president_name?: string | null;

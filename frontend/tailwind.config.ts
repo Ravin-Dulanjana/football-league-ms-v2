@@ -10,7 +10,6 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Design tokens: deep slate base + electric blue accent
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -44,38 +43,49 @@ const config: Config = {
           DEFAULT: "hsl(var(--popover))",
           foreground: "hsl(var(--popover-foreground))",
         },
-        // WFL brand colors (for direct use as utility classes)
-        league: {
-          navy: "#1a3563",
-          gold: "#c9a227",
+        // Boardroom gold accent
+        gold: {
+          DEFAULT: "hsl(var(--gold))",
+          soft: "hsl(var(--gold-soft))",
         },
-        // Semantic status colors (consistent across all badges)
+        // WFL brand direct-use utilities
+        league: {
+          navy: "#1B3A6B",
+          gold: "#BE9B43",
+          paper: "#F4F1E9",
+          ink: "#16223B",
+        },
+        // Semantic status colors
         status: {
           active: "#22c55e",
           pending: "#f59e0b",
           inactive: "#6b7280",
-          released: "#ef4444",
-          rejected: "#ef4444",
+          released: "#B4453C",
+          rejected: "#B4453C",
           draft: "#6b7280",
           open: "#3b82f6",
           closed: "#8b5cf6",
           archived: "#374151",
           approved: "#22c55e",
           reviewed: "#3b82f6",
-          returned: "#f59e0b",
+          returned: "#B5852A",
           submitted: "#3b82f6",
           resubmitted: "#8b5cf6",
-          suspended: "#ef4444",
+          suspended: "#B4453C",
         },
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-geist-mono)", "monospace"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        serif: ["var(--font-serif)", "Georgia", "serif"],
+        mono: ["var(--font-mono)", "monospace"],
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      boxShadow: {
+        card: "0 1px 2px rgba(20,30,55,.04), 0 10px 30px -12px rgba(20,30,55,.10)",
       },
       keyframes: {
         "fade-in": {
@@ -86,10 +96,15 @@ const config: Config = {
           from: { transform: "translateX(-100%)" },
           to: { transform: "translateX(0)" },
         },
+        "slide-up": {
+          from: { transform: "translateY(100%)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.15s ease-out",
         "slide-in": "slide-in-from-left 0.2s ease-out",
+        "slide-up": "slide-up 0.25s ease-out",
       },
     },
   },
