@@ -225,8 +225,13 @@ export default function ClubMembershipsPage() {
     return p.club_id !== null;
   }) ?? [];
 
-  const pendingRequests = requests?.filter((r) => r.status === "pending") ?? [];
-  const pastRequests = requests?.filter((r) => r.status !== "pending") ?? [];
+  // Scope requests to own club for club admins
+  const visibleRequests = (requests ?? []).filter((r) => {
+    if (isClubAdmin && currentUser?.club_id) return r.club_id === currentUser.club_id;
+    return true;
+  });
+  const pendingRequests = visibleRequests.filter((r) => r.status === "pending");
+  const pastRequests = visibleRequests.filter((r) => r.status !== "pending");
 
   return (
     <div>
@@ -335,7 +340,7 @@ export default function ClubMembershipsPage() {
           <DataTableSkeleton columns={4} />
         ) : reqError ? (
           <ErrorState message={(reqError as Error).message} onRetry={() => refetchReqs()} />
-        ) : !requests?.length ? (
+        ) : !visibleRequests.length ? (
           <EmptyState
             title="No invites yet"
             icon={<UserPlus className="h-6 w-6" />}
@@ -369,7 +374,7 @@ export default function ClubMembershipsPage() {
                             {formatRelative(req.created_at)}
                           </TableCell>
                           <TableCell>
-                            {isClubAdmin && (
+                            {isClubAdmin && req.club_id === currentUser?.club_id && (
                               <Button
                                 size="sm"
                                 variant="ghost"
