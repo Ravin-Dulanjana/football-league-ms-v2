@@ -17,6 +17,7 @@ const serif = Newsreader({
   weight: ["400", "500", "600"],
   style: ["normal", "italic"],
   display: "swap",
+  adjustFontFallback: false,
 });
 
 const mono = JetBrains_Mono({

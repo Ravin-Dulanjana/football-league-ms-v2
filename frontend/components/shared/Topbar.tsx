@@ -76,7 +76,7 @@ export function Topbar({ mobile = false }: TopbarProps) {
                   Wattala FL
                 </Link>
               </li>
-              {breadcrumbs.map((crumb, i) => (
+              {breadcrumbs.map((crumb) => (
                 <li key={crumb.href} className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">/</span>
                   {crumb.isLast ? (
