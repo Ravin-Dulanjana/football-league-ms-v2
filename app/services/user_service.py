@@ -83,6 +83,21 @@ def attach_governance_roles(db: Session, users: list[User]) -> list[User]:
     return users
 
 
+def attach_player_names(db: Session, users: list[User]) -> list[User]:
+    """Populate user.full_name from the linked Player for player-type users."""
+    player_ids = [u.player_id for u in users if u.player_id is not None]
+    if not player_ids:
+        return users
+    players = list(
+        db.execute(select(Player).where(Player.id.in_(player_ids))).scalars().all()
+    )
+    name_map = {p.id: p.full_name for p in players}
+    for user in users:
+        if user.player_id and user.player_id in name_map:
+            user.full_name = name_map[user.player_id]  # type: ignore[attr-defined]
+    return users
+
+
 def get_all_users(
     db: Session,
     current_user: CurrentUser,
@@ -100,7 +115,8 @@ def get_all_users(
     if current_user.role == "club_admin" and current_user.club_id:
         q = q.where(User.club_id == current_user.club_id)
     users = list(db.execute(q.order_by(User.id)).scalars().all())
-    return attach_governance_roles(db, users)
+    attach_governance_roles(db, users)
+    return attach_player_names(db, users)
 
 
 # ---------------------------------------------------------------------------

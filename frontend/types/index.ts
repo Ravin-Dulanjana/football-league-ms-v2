@@ -48,6 +48,8 @@ export interface UserRead {
   last_login_at: string | null;
   // All active governance roles (can hold club_admin + league_admin simultaneously)
   governance_roles: GovernanceRoleRead[];
+  // Populated from linked Player profile for player-type users
+  full_name: string | null;
 }
 
 export interface UserCreate {

@@ -157,8 +157,8 @@ export function Sidebar() {
           className="rounded-full shrink-0"
         />
         <div className="leading-tight min-w-0">
-          <p className="font-serif font-semibold text-sm text-foreground tracking-tight truncate">
-            Wattala Football League
+          <p className="font-serif font-semibold text-sm text-foreground tracking-tight leading-snug">
+            Wattala<br />Football League
           </p>
         </div>
       </Link>
