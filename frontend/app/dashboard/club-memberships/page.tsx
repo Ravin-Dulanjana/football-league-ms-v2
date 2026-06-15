@@ -184,15 +184,15 @@ function ReleaseDialog({
 type Tab = "roster" | "invites";
 
 export default function ClubMembershipsPage() {
-  const [tab, setTab] = useState<Tab>("roster");
+  const { isClubAdmin, isLeagueLevel, isPlayer, user: currentUser } = useCurrentUser();
+  const [tab, setTab] = useState<Tab>(isPlayer ? "invites" : "roster");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [releaseTarget, setReleaseTarget] = useState<PlayerRead | null>(null);
-  const { isClubAdmin, isLeagueLevel, user: currentUser } = useCurrentUser();
 
   const { data: clubs } = useQuery<ClubRead[]>({
     queryKey: ["clubs"],
     queryFn: clubsApi.list,
-    enabled: isLeagueLevel,
+    enabled: isLeagueLevel || isPlayer,
   });
 
   const clubMap = Object.fromEntries((clubs ?? []).map((c) => [c.id, c.name]));
@@ -209,16 +209,28 @@ export default function ClubMembershipsPage() {
       queryFn: clubMembershipsApi.listRequests,
     });
 
+  const queryClient = useQueryClient();
+
   const cancelMutation = useMutation({
     mutationFn: (id: number) => clubMembershipsApi.cancel(id),
     onSuccess: () => {
       toast.success("Invite cancelled");
       queryClient.invalidateQueries({ queryKey: ["club-memberships"] });
+      queryClient.invalidateQueries({ queryKey: ["players"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const queryClient = useQueryClient();
+  const decideMutation = useMutation({
+    mutationFn: ({ id, decision }: { id: number; decision: "accept" | "reject" }) =>
+      clubMembershipsApi.decide(id, { decision }),
+    onSuccess: (_, { decision }) => {
+      toast.success(decision === "accept" ? "You've joined the club!" : "Invite declined");
+      queryClient.invalidateQueries({ queryKey: ["club-memberships"] });
+      queryClient.invalidateQueries({ queryKey: ["players"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   const clubPlayers = players?.filter((p) => {
     if (isClubAdmin && currentUser?.club_id) return p.club_id === currentUser.club_id;
@@ -231,8 +243,12 @@ export default function ClubMembershipsPage() {
   return (
     <div>
       <PageHeader
-        title="Club Roster"
-        description="Manage who is in your club and send invites to free players"
+        title={isPlayer ? "Club Invites" : "Club Roster"}
+        description={
+          isPlayer
+            ? "Clubs that have invited you to join"
+            : "Manage who is in your club and send invites to free players"
+        }
         action={
           isClubAdmin ? (
             <Button size="sm" onClick={() => setInviteOpen(true)} className="gap-1.5">
@@ -356,7 +372,7 @@ export default function ClubMembershipsPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Player ID</TableHead>
+                        <TableHead>{isPlayer ? "Club" : "Player"}</TableHead>
                         <TableHead>Sent</TableHead>
                         <TableHead />
                       </TableRow>
@@ -364,22 +380,49 @@ export default function ClubMembershipsPage() {
                     <TableBody>
                       {pendingRequests.map((req) => (
                         <TableRow key={req.id}>
-                          <TableCell className="font-mono text-sm">#{req.player_id}</TableCell>
+                          <TableCell className="font-medium text-sm">
+                            {isPlayer
+                              ? (clubMap[req.club_id] ?? `Club #${req.club_id}`)
+                              : `#${req.player_id}`}
+                          </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {formatRelative(req.created_at)}
                           </TableCell>
                           <TableCell>
-                            {isClubAdmin && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
-                                onClick={() => cancelMutation.mutate(req.id)}
-                                disabled={cancelMutation.isPending}
-                              >
-                                <X className="h-3 w-3" />
-                                Cancel
-                              </Button>
+                            {isPlayer ? (
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  className="h-7 gap-1 text-xs"
+                                  onClick={() => decideMutation.mutate({ id: req.id, decision: "accept" })}
+                                  disabled={decideMutation.isPending}
+                                >
+                                  Accept
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
+                                  onClick={() => decideMutation.mutate({ id: req.id, decision: "reject" })}
+                                  disabled={decideMutation.isPending}
+                                >
+                                  Decline
+                                </Button>
+                              </div>
+                            ) : (
+                              isClubAdmin && req.club_id === currentUser?.club_id && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
+                                  onClick={() => cancelMutation.mutate(req.id)}
+                                  disabled={cancelMutation.isPending}
+                                >
+                                  <X className="h-3 w-3" />
+                                  Cancel
+                                </Button>
+                              )
                             )}
                           </TableCell>
                         </TableRow>
@@ -399,7 +442,7 @@ export default function ClubMembershipsPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Player ID</TableHead>
+                        <TableHead>{isPlayer ? "Club" : "Player"}</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Responded</TableHead>
                       </TableRow>
@@ -407,7 +450,11 @@ export default function ClubMembershipsPage() {
                     <TableBody>
                       {pastRequests.map((req) => (
                         <TableRow key={req.id}>
-                          <TableCell className="font-mono text-sm">#{req.player_id}</TableCell>
+                          <TableCell className="font-medium text-sm">
+                            {isPlayer
+                              ? (clubMap[req.club_id] ?? `Club #${req.club_id}`)
+                              : `#${req.player_id}`}
+                          </TableCell>
                           <TableCell>
                             <StatusBadge status={req.status} />
                           </TableCell>
