@@ -45,6 +45,7 @@ import {
 import {
   ConfirmDialog,
 } from "@/components/shared/DataTable";
+import { ImageLightbox } from "@/components/shared/ImageLightbox";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
@@ -450,6 +451,7 @@ export default function ClubDetailPage() {
   const [deleteStaffTarget, setDeleteStaffTarget] = useState<ClubStaffRead | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [coverUploading, setCoverUploading] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { user, isSuperAdmin } = useCurrentUser();
 
@@ -634,13 +636,14 @@ export default function ClubDetailPage() {
       {/* Club header card with cover photo */}
       <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-card">
         {/* Cover photo banner */}
-        <div className="relative h-44 sm:h-52 bg-secondary">
+        <div className="relative h-56 sm:h-72 bg-secondary">
           {club.cover_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={club.cover_url}
               alt={`${club.name} cover`}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover cursor-zoom-in"
+              onClick={() => setLightboxSrc(club.cover_url!)}
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground/40">
@@ -680,7 +683,8 @@ export default function ClubDetailPage() {
                   <img
                     src={club.logo_url}
                     alt={club.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover cursor-zoom-in"
+                    onClick={() => setLightboxSrc(club.logo_url!)}
                   />
                 ) : (
                   <span className="text-lg">{club.code.slice(0, 3)}</span>
@@ -1101,6 +1105,13 @@ export default function ClubDetailPage() {
           onConfirm={() => deleteStaffMutation.mutate(deleteStaffTarget.id)}
         />
       )}
+
+      <ImageLightbox
+        src={lightboxSrc ?? ""}
+        alt="Photo"
+        open={!!lightboxSrc}
+        onClose={() => setLightboxSrc(null)}
+      />
     </div>
   );
 }

@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Calendar, CreditCard, ExternalLink, FileText, Hash } from "lucide-react";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ImageLightbox } from "@/components/shared/ImageLightbox";
 import { playersApi, clubsApi, registrationsApi, releasesApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import type { ClubRead, PlayerRead, RegistrationRequestRead, ReleaseRead } from "@/types";
@@ -13,6 +15,7 @@ export default function PlayerDetailPage() {
   const params = useParams();
   const router = useRouter();
   const playerId = Number(params.id);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const { data: player, isLoading } = useQuery<PlayerRead>({
     queryKey: ["player", playerId],
@@ -91,7 +94,8 @@ export default function PlayerDetailPage() {
               <img
                 src={player.photo_url}
                 alt={player.full_name}
-                className="w-20 h-20 rounded-full object-cover ring-2 ring-border"
+                className="w-20 h-20 rounded-full object-cover ring-2 ring-border cursor-zoom-in"
+                onClick={() => setLightboxSrc(player.photo_url!)}
               />
             ) : (
               <div className="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-bold ring-2 ring-border">
@@ -226,6 +230,13 @@ export default function PlayerDetailPage() {
           </button>
         </div>
       )}
+
+      <ImageLightbox
+        src={lightboxSrc ?? ""}
+        alt="Player photo"
+        open={!!lightboxSrc}
+        onClose={() => setLightboxSrc(null)}
+      />
     </div>
   );
 }

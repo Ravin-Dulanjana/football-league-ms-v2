@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/DataTable";
+import { ImageLightbox } from "@/components/shared/ImageLightbox";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { clubsApi, playersApi } from "@/lib/api";
 import type { ClubRead, PlayerRead } from "@/types";
@@ -120,6 +121,7 @@ function PhotoUploadButton({
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -157,7 +159,8 @@ function PhotoUploadButton({
           <img
             src={currentPhotoUrl}
             alt="Profile"
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover cursor-zoom-in"
+            onClick={() => setLightboxOpen(true)}
           />
         ) : (
           <User className="h-8 w-8" />
@@ -182,6 +185,14 @@ function PhotoUploadButton({
         className="hidden"
         onChange={handleFileChange}
       />
+      {currentPhotoUrl && (
+        <ImageLightbox
+          src={currentPhotoUrl}
+          alt="Profile photo"
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
     </div>
   );
 }

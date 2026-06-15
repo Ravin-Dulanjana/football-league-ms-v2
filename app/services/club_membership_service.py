@@ -44,7 +44,9 @@ def get_all_requests(
       league+    — all
     """
     q = select(ClubMembershipRequest).order_by(ClubMembershipRequest.id.desc())
-    if current_user.role == "club_admin" and current_user.club_id:
+    if current_user.role == "club_admin":
+        if not current_user.club_id:
+            return []
         q = q.where(ClubMembershipRequest.club_id == current_user.club_id)
     elif current_user.role == "player" and current_user.player_id:
         q = q.where(ClubMembershipRequest.player_id == current_user.player_id)
