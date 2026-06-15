@@ -68,12 +68,20 @@ function makeCreateSchema(creatorIsClubAdmin: boolean) {
       club_id: z.number().optional(),
       temporary_password: z.string().min(8, "At least 8 characters"),
       full_name: z.string().min(1, "Required"),
-      date_of_birth: z.string().min(1, "Required"),
-      nic_number: z.string().min(1, "Required"),
+      date_of_birth: z.string().optional(),
+      nic_number: z.string().optional(),
     })
     .superRefine((val, ctx) => {
       if (val.account_type === "club_staff" && !creatorIsClubAdmin && !val.club_id) {
         ctx.addIssue({ code: "custom", path: ["club_id"], message: "Select a club" });
+      }
+      if (val.account_type === "player") {
+        if (!val.date_of_birth) {
+          ctx.addIssue({ code: "custom", path: ["date_of_birth"], message: "Required for players" });
+        }
+        if (!val.nic_number) {
+          ctx.addIssue({ code: "custom", path: ["nic_number"], message: "Required for players" });
+        }
       }
     });
 }
@@ -112,14 +120,17 @@ function CreateUserDialog({
   const accountType = form.watch("account_type") as AccountType;
 
   const ACCOUNT_TYPE_LABELS: Record<AccountType, { label: string; hint: string }> = {
-    player: { label: "Player", hint: "Creates a player profile. Club assigned through registration." },
-    club_staff: {
-      label: "Club Staff",
-      hint: creatorIsClubAdmin
-        ? "Staff member for your club (coach, physio, secretary, etc.)."
-        : "Staff member for a specific club.",
+    player: {
+      label: "Player",
+      hint: "Will appear on the player roster. Needs NIC and date of birth for league registration.",
     },
-    account: { label: "Account", hint: "Generic user with no club yet. Assign a role after creation." },
+    club_staff: {
+      label: "Club Official",
+      hint: creatorIsClubAdmin
+        ? "Coach, physio, secretary, or any other club staff. No extra details needed."
+        : "Staff member attached to a specific club.",
+    },
+    account: { label: "Account only", hint: "Generic login with no club yet. Assign a role after creation." },
   };
 
   const availableTypes: AccountType[] = creatorIsClubAdmin
@@ -162,11 +173,16 @@ function CreateUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New account</DialogTitle>
+          <DialogTitle>{creatorIsClubAdmin ? "Add member" : "New account"}</DialogTitle>
         </DialogHeader>
+        {creatorIsClubAdmin && (
+          <p className="text-sm text-muted-foreground -mt-2">
+            Choose if this person is a player or a club official. You can always update their details later.
+          </p>
+        )}
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="space-y-1.5">
-            <Label>Account type *</Label>
+            <Label>{creatorIsClubAdmin ? "Member type *" : "Account type *"}</Label>
             <div className="grid grid-cols-1 gap-2">
               {availableTypes.map((t) => (
                 <button
@@ -225,23 +241,31 @@ function CreateUserDialog({
               <p className="text-xs text-destructive">{form.formState.errors.full_name.message}</p>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="date_of_birth">Date of birth *</Label>
-            <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
-            {form.formState.errors.date_of_birth && (
-              <p className="text-xs text-destructive">{form.formState.errors.date_of_birth.message}</p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="nic_number">NIC number *</Label>
-            <Input id="nic_number" {...form.register("nic_number")} placeholder="e.g. 901234567V" />
-            {form.formState.errors.nic_number && (
-              <p className="text-xs text-destructive">{form.formState.errors.nic_number.message}</p>
-            )}
-          </div>
+
+          {accountType === "player" && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="date_of_birth">Date of birth *</Label>
+                <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
+                {form.formState.errors.date_of_birth && (
+                  <p className="text-xs text-destructive">{form.formState.errors.date_of_birth.message}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nic_number">NIC number *</Label>
+                <Input id="nic_number" {...form.register("nic_number")} placeholder="e.g. 901234567V" />
+                <p className="text-xs text-muted-foreground">Required for official league registration</p>
+                {form.formState.errors.nic_number && (
+                  <p className="text-xs text-destructive">{form.formState.errors.nic_number.message}</p>
+                )}
+              </div>
+            </>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="tmp-pw">Temporary password *</Label>
             <Input id="tmp-pw" type="password" {...form.register("temporary_password")} placeholder="Min. 8 characters" />
+            <p className="text-xs text-muted-foreground">They will be asked to change this when they first log in</p>
             {form.formState.errors.temporary_password && (
               <p className="text-xs text-destructive">{form.formState.errors.temporary_password.message}</p>
             )}
@@ -250,7 +274,7 @@ function CreateUserDialog({
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Creating…" : "Create account"}
+              {mutation.isPending ? "Creating…" : creatorIsClubAdmin ? "Add member" : "Create account"}
             </Button>
           </DialogFooter>
         </form>
@@ -541,7 +565,7 @@ export default function UsersPage() {
   const [clubFilter, setClubFilter] = useState<number | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const queryClient = useQueryClient();
-  const { isSuperAdmin, isLeagueLevel, isAnyAdmin, user: currentUser } = useCurrentUser();
+  const { isSuperAdmin, isLeagueLevel, isClubAdmin, isAnyAdmin, user: currentUser } = useCurrentUser();
 
   const { data: clubs } = useQuery<ClubRead[]>({
     queryKey: ["clubs"],
@@ -621,13 +645,13 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader
-        title="Users"
-        description="All accounts in the system"
+        title={isClubAdmin ? "Members" : "Users"}
+        description={isClubAdmin ? "Everyone in your club" : "All accounts in the system"}
         action={
-          isLeagueLevel && tab === "active" ? (
+          (isLeagueLevel || isClubAdmin) && tab === "active" ? (
             <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
               <Plus className="h-4 w-4" />
-              New user
+              {isClubAdmin ? "Add member" : "New user"}
             </Button>
           ) : undefined
         }
@@ -709,11 +733,11 @@ export default function UsersPage() {
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
       ) : !users?.length ? (
         <EmptyState
-          title={tab === "deleted" ? "No deleted users" : "No users"}
+          title={tab === "deleted" ? "No deleted users" : isClubAdmin ? "No members yet" : "No users"}
           icon={<Users className="h-6 w-6" />}
           action={
-            isLeagueLevel && tab === "active"
-              ? { label: "Create user", onClick: () => setCreateOpen(true) }
+            (isLeagueLevel || isClubAdmin) && tab === "active"
+              ? { label: isClubAdmin ? "Add member" : "Create user", onClick: () => setCreateOpen(true) }
               : undefined
           }
         />

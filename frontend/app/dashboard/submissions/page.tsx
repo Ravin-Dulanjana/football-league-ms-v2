@@ -259,7 +259,10 @@ function SubmissionRow({
               {/* Players */}
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Players ({squadRegs.length}/30)
+                  Players ({squadRegs.length}/30
+                  {squadRegs.length < 17 && (
+                    <span className="text-amber-600 ml-1">— min 17 required</span>
+                  )})
                 </p>
                 {squadRegs.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No players registered.</p>
@@ -297,7 +300,7 @@ function SubmissionRow({
               {/* Staff */}
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Support Staff ({squadStaff.length}/6)
+                  Support Staff ({squadStaff.length}/10)
                 </p>
                 {squadStaff.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No staff added.</p>
