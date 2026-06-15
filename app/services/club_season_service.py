@@ -40,6 +40,7 @@ from app.models.club_season import (
     UnlockApproval,
     UnlockRequestStatus,
 )
+from app.models.registration import RegistrationRequest, RegistrationRequestStatus
 from app.models.season import Season
 from app.schemas.club_season import (
     ClubSeasonProfileCreate,
@@ -53,7 +54,8 @@ from app.services.season_service import is_registration_window_open
 
 logger = get_logger(__name__)
 
-MAX_STAFF_PER_CLUB_SEASON = 6
+MAX_STAFF_PER_CLUB_SEASON = 10
+MIN_PLAYERS_PER_CLUB_SEASON = 17
 
 # ---------------------------------------------------------------------------
 # ClubSeasonProfile
@@ -134,6 +136,21 @@ def submit_profile(
             None,
             f"Cannot submit from status '{profile.status}'. "
             "Profile must be in draft, returned, or reviewed state.",
+        )
+
+    # Enforce minimum squad size before submission.
+    accepted_count = db.execute(
+        select(func.count()).where(
+            RegistrationRequest.club_id == profile.club_id,
+            RegistrationRequest.season_id == profile.season_id,
+            RegistrationRequest.status == RegistrationRequestStatus.ACCEPTED,
+        )
+    ).scalar_one()
+    if accepted_count < MIN_PLAYERS_PER_CLUB_SEASON:
+        return (
+            None,
+            f"At least {MIN_PLAYERS_PER_CLUB_SEASON} players must be registered "
+            f"before submitting. Currently {accepted_count} accepted.",
         )
 
     now = datetime.now(tz=UTC)
