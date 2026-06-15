@@ -59,7 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Club Roster",
         href: "/dashboard/club-memberships",
         icon: UserCheck,
-        roles: ["super_admin", "league_admin", "club_admin"],
+        roles: ["super_admin", "league_admin", "club_admin", "player"],
       },
       {
         label: "Registrations",
