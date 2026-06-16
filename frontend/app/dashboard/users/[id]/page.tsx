@@ -109,7 +109,12 @@ export default function UserDetailPage() {
           <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
           <div>
             <p className="text-xs text-muted-foreground">Email</p>
-            <p className="text-sm font-medium mt-0.5 break-all">{user.email}</p>
+            <a
+              href={`mailto:${user.email}`}
+              className="text-sm font-medium mt-0.5 break-all hover:text-primary transition-colors"
+            >
+              {user.email}
+            </a>
           </div>
         </div>
 
