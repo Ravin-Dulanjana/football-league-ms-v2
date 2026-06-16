@@ -76,10 +76,25 @@ def attach_governance_roles(db: Session, users: list[User]) -> list[User]:
     Load governance roles from the junction table and attach them to each
     User object as a transient attribute so UserRead serialisation can access
     them without requiring a SQLAlchemy relationship.
+
+    Also restores user.club_id for club_admin users whose row was corrupted
+    to NULL — the governance role entry is the authoritative source.
     """
     gmap = get_governance_roles(db, [u.id for u in users])
+    needs_commit = False
     for user in users:
-        user.governance_roles = gmap.get(user.id, [])  # type: ignore[attr-defined]
+        roles = gmap.get(user.id, [])
+        user.governance_roles = roles  # type: ignore[attr-defined]
+        if user.role == "club_admin" and user.club_id is None:
+            gov_club_id = next(
+                (r.club_id for r in roles if r.role == "club_admin" and r.club_id),
+                None,
+            )
+            if gov_club_id is not None:
+                user.club_id = gov_club_id
+                needs_commit = True
+    if needs_commit:
+        db.commit()
     return users
 
 
