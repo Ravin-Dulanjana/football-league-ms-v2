@@ -64,7 +64,7 @@ const createSchema = z.object({
   full_name: z.string().min(1, "Required"),
   date_of_birth: z.string().min(1, "Required"),
   nic_number: z.string().min(1, "Required"),
-  phone_number: z.string().optional(),
+  phone_number: z.string().min(1, "Phone number is required"),
 });
 
 type CreateForm = z.infer<typeof createSchema>;
@@ -100,7 +100,7 @@ function CreateUserDialog({
         full_name: data.full_name,
         date_of_birth: data.date_of_birth,
         nic_number: data.nic_number,
-        phone_number: data.phone_number || undefined,
+        phone_number: data.phone_number,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -153,8 +153,11 @@ function CreateUserDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="phone_number">Phone number</Label>
+            <Label htmlFor="phone_number">Phone number *</Label>
             <Input id="phone_number" type="tel" {...form.register("phone_number")} placeholder="e.g. 0771234567" />
+            {form.formState.errors.phone_number && (
+              <p className="text-xs text-destructive">{form.formState.errors.phone_number.message}</p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -681,58 +684,65 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(user.created_at)}</TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {user.is_active ? (
-                            <DropdownMenuItem onClick={() => setActionTarget({ user, action: "deactivate", label: "Deactivate user" })}>
-                              Deactivate
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onClick={() => setActionTarget({ user, action: "activate", label: "Activate user" })}>
-                              Activate
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem onClick={() => setActionTarget({ user, action: "reset_password", label: "Reset password" })}>
-                            Reset password
-                          </DropdownMenuItem>
-
-                          {/* Role management — visible to all admins (scoped by permission on backend) */}
-                          {canManageRoles && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => setAssignRoleTarget(user)}>
-                                Assign role
-                              </DropdownMenuItem>
-                              {govRoles.map((gr) => (
-                                <DropdownMenuItem
-                                  key={`revoke-${gr.role}`}
-                                  className="text-destructive focus:text-destructive"
-                                  onClick={() => setRevokeRoleTarget({ user, role: gr.role, club_id: gr.club_id ?? null })}
-                                >
-                                  Revoke {gr.role.replace(/_/g, " ")}
+                      {(isLeagueLevel || canManageRoles) && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {/* Deactivate / reset — league admin and super admin only */}
+                            {isLeagueLevel && (
+                              <>
+                                {user.is_active ? (
+                                  <DropdownMenuItem onClick={() => setActionTarget({ user, action: "deactivate", label: "Deactivate user" })}>
+                                    Deactivate
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem onClick={() => setActionTarget({ user, action: "activate", label: "Activate user" })}>
+                                    Activate
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={() => setActionTarget({ user, action: "reset_password", label: "Reset password" })}>
+                                  Reset password
                                 </DropdownMenuItem>
-                              ))}
-                            </>
-                          )}
+                              </>
+                            )}
 
-                          {isSuperAdmin && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onClick={() => setActionTarget({ user, action: "soft_delete", label: "Delete user" })}
-                              >
-                                Delete user
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            {/* Role management — all admins */}
+                            {canManageRoles && (
+                              <>
+                                {isLeagueLevel && <DropdownMenuSeparator />}
+                                <DropdownMenuItem onClick={() => setAssignRoleTarget(user)}>
+                                  Assign role
+                                </DropdownMenuItem>
+                                {govRoles.map((gr) => (
+                                  <DropdownMenuItem
+                                    key={`revoke-${gr.role}`}
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => setRevokeRoleTarget({ user, role: gr.role, club_id: gr.club_id ?? null })}
+                                  >
+                                    Revoke {gr.role.replace(/_/g, " ")}
+                                  </DropdownMenuItem>
+                                ))}
+                              </>
+                            )}
+
+                            {isSuperAdmin && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => setActionTarget({ user, action: "soft_delete", label: "Delete user" })}
+                                >
+                                  Delete user
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </TableCell>
                     <TableCell className="w-6">
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
