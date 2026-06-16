@@ -707,10 +707,10 @@ export default function ClubDetailPage() {
           />
         </div>
 
-        {/* Logo + info row — logo overlaps cover bottom */}
+        {/* Logo + info — logo overlaps cover, text sits clearly below */}
         <div className="px-5 pb-5">
-          <div className="flex items-end gap-4 -mt-8 sm:-mt-10 mb-4">
-            {/* Logo overlapping cover */}
+          {/* Logo row: overlaps cover via negative margin; edit button floats right */}
+          <div className="flex items-end justify-between -mt-10 sm:-mt-12 mb-3">
             <div className="relative shrink-0">
               <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-primary/10 text-primary font-bold text-xl flex items-center justify-center overflow-hidden border-4 border-card shadow-card">
                 {club.logo_url ? (
@@ -726,28 +726,29 @@ export default function ClubDetailPage() {
                 )}
               </div>
             </div>
-            <div className="flex-1 min-w-0 pb-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-serif text-xl font-semibold">{club.name}</h1>
-                <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-secondary text-muted-foreground">
-                  {club.code}
-                </span>
-                <StatusBadge status={club.status} />
-              </div>
-              {club.established_year && (
-                <p className="eyebrow mt-0.5">Est. {club.established_year}</p>
-              )}
-            </div>
             {canEdit && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setEditOpen(true)}
-                className="shrink-0 mb-1"
+                className="shrink-0"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Edit club
               </Button>
+            )}
+          </div>
+          {/* Club name + badges — separate row, sits cleanly below cover */}
+          <div className="mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="font-serif text-xl font-semibold">{club.name}</h1>
+              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-secondary text-muted-foreground">
+                {club.code}
+              </span>
+              <StatusBadge status={club.status} />
+            </div>
+            {club.established_year && (
+              <p className="eyebrow mt-0.5">Est. {club.established_year}</p>
             )}
           </div>
 

@@ -19,6 +19,11 @@ export function useCurrentUser() {
   });
 
   const role = user?.role as UserRole | undefined;
+  const govRoles = user?.governance_roles ?? [];
+  // A league_admin who is also a club_admin has users.role = "league_admin" (highest),
+  // so we must check governance_roles too to correctly grant club-admin UI access.
+  const isClubAdmin =
+    role === "club_admin" || govRoles.some((gr) => gr.role === "club_admin");
 
   return {
     user,
@@ -27,7 +32,7 @@ export function useCurrentUser() {
     role,
     isSuperAdmin: role === "super_admin",
     isLeagueAdmin: role === "league_admin",
-    isClubAdmin: role === "club_admin",
+    isClubAdmin,
     isPlayer: role === "player",
     isClubStaff: role === "club_staff",
     isLeagueLevel: role === "super_admin" || role === "league_admin",
