@@ -97,9 +97,13 @@ def attach_player_names(db: Session, users: list[User]) -> list[User]:
     for user in users:
         if user.player_id and user.player_id in name_map:
             user.full_name = name_map[user.player_id]  # type: ignore[attr-defined]
-        if user.player_id is not None and club_map.get(user.player_id) != user.club_id:
-            user.club_id = club_map.get(user.player_id)
-            needs_commit = True
+        # Only sync club_id for plain player-role users; admins' club_id
+        # means "club I manage" and is set at role assignment.
+        if user.role == "player" and user.player_id is not None:
+            player_club_id = club_map.get(user.player_id)
+            if player_club_id != user.club_id:
+                user.club_id = player_club_id
+                needs_commit = True
     if needs_commit:
         db.commit()
     return users
