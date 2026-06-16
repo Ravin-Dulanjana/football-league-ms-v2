@@ -693,7 +693,10 @@ export default function ClubDetailPage() {
   });
   const clubRequests = allClubRequests.filter((r) => r.club_id === clubId);
   const pendingInvites = clubRequests.filter((r) => r.status === "pending");
-  const pastInvites = clubRequests.filter((r) => r.status !== "pending");
+  // Accepted invites are visible in the Members tab — exclude them here.
+  const pastInvites = clubRequests.filter(
+    (r) => r.status !== "pending" && r.status !== "accepted"
+  );
 
   const { data: freePlayers = [], isLoading: freePlayersLoading } = useQuery<PlayerRead[]>({
     queryKey: ["club-memberships", "free-players"],
