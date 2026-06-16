@@ -48,9 +48,9 @@ def get_me(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     user_service.attach_governance_roles(db, [user])
-    # Keep user.club_id in sync with the linked player's club.
-    # This self-heals any rows where club_id was not updated at invite-accept time.
-    if user.player_id is not None:
+    # For plain player-role users, keep user.club_id in sync with the linked player.
+    # Admins' club_id means "club I manage" and must not be overwritten.
+    if user.role == "player" and user.player_id is not None:
         player = db.get(Player, user.player_id)
         if player is not None and player.club_id != user.club_id:
             user.club_id = player.club_id
