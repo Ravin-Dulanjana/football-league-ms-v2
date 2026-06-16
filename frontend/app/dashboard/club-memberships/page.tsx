@@ -266,9 +266,9 @@ export default function ClubMembershipsPage() {
         }
       />
 
-      {/* Tabs */}
+      {/* Tabs — free players (no club) only see the Invites tab */}
       <div className="flex gap-1 mb-4 border-b border-border">
-        {(["roster", "invites"] as Tab[]).map((t) => (
+        {(["roster", "invites"] as Tab[]).filter((t) => !(t === "roster" && isPlayer && !currentUser?.club_id)).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}

@@ -25,8 +25,10 @@ import {
   Shield,
   Shirt,
   Trash2,
+  UserPlus,
   UserSquare2,
   Users,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -55,6 +57,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   clubsApi,
+  clubMembershipsApi,
   staffApi,
   usersApi,
   registrationsApi,
@@ -62,8 +65,9 @@ import {
   seasonsApi,
   profilesApi,
 } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatRelative } from "@/lib/utils";
 import type {
+  ClubMembershipRequestRead,
   ClubRead,
   ClubSeasonProfileRead,
   ClubStaffRead,
@@ -79,15 +83,7 @@ import type {
 // Segment navigation
 // ---------------------------------------------------------------------------
 
-type Segment = "overview" | "members" | "staff" | "admins" | "squad";
-
-const SEGMENTS: { id: Segment; label: string; icon: React.ElementType }[] = [
-  { id: "overview", label: "Overview", icon: Building2 },
-  { id: "members", label: "Members", icon: Users },
-  { id: "staff", label: "Support Staff", icon: UserSquare2 },
-  { id: "admins", label: "Admins", icon: Shield },
-  { id: "squad", label: "Season Squad", icon: ClipboardCheck },
-];
+type Segment = "overview" | "members" | "staff" | "admins" | "squad" | "invites";
 
 // ---------------------------------------------------------------------------
 // Searchable member picker (used in officials section of EditClubDialog)
@@ -677,6 +673,57 @@ export default function ClubDetailPage() {
   );
   const totalMembers = clubPlayers.length + adminOnlyMembers.length;
 
+  // Segment definitions — "invites" is only shown to the club's own admins
+  const SEGMENTS: { id: Segment; label: string; icon: React.ElementType }[] = [
+    { id: "overview", label: "Overview", icon: Building2 },
+    { id: "members", label: "Members", icon: Users },
+    { id: "staff", label: "Support Staff", icon: UserSquare2 },
+    { id: "admins", label: "Admins", icon: Shield },
+    { id: "squad", label: "Season Squad", icon: ClipboardCheck },
+    ...(isOwnClubAdmin
+      ? [{ id: "invites" as Segment, label: "Invites", icon: UserPlus }]
+      : []),
+  ];
+
+  // Club invites — only fetched when own club admin views the invites tab
+  const { data: allClubRequests = [], refetch: refetchInvites } = useQuery<ClubMembershipRequestRead[]>({
+    queryKey: ["club-memberships", "requests"],
+    queryFn: clubMembershipsApi.listRequests,
+    enabled: segment === "invites" && isOwnClubAdmin,
+  });
+  const clubRequests = allClubRequests.filter((r) => r.club_id === clubId);
+  const pendingInvites = clubRequests.filter((r) => r.status === "pending");
+  const pastInvites = clubRequests.filter((r) => r.status !== "pending");
+
+  const { data: freePlayers = [], isLoading: freePlayersLoading } = useQuery<PlayerRead[]>({
+    queryKey: ["club-memberships", "free-players"],
+    queryFn: clubMembershipsApi.listFreePlayers,
+    enabled: segment === "invites" && isOwnClubAdmin,
+  });
+
+  const [invitePlayerId, setInvitePlayerId] = useState<number | null>(null);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+
+  const sendInviteMutation = useMutation({
+    mutationFn: () => clubMembershipsApi.invite({ player_id: invitePlayerId! }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-memberships"] });
+      toast.success("Invite sent");
+      setInviteDialogOpen(false);
+      setInvitePlayerId(null);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const cancelInviteMutation = useMutation({
+    mutationFn: (id: number) => clubMembershipsApi.cancel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-memberships"] });
+      toast.success("Invite cancelled");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const deleteStaffMutation = useMutation({
     mutationFn: (id: number) => staffApi.delete(id),
     onSuccess: () => {
@@ -1239,6 +1286,144 @@ export default function ClubDetailPage() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* Invites tab — own club admins only */}
+      {segment === "invites" && isOwnClubAdmin && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs text-muted-foreground">
+              {pendingInvites.length} pending · {pastInvites.length} past
+            </p>
+            <Button size="sm" onClick={() => setInviteDialogOpen(true)} className="gap-1.5">
+              <UserPlus className="h-4 w-4" />
+              Invite member
+            </Button>
+          </div>
+
+          {clubRequests.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border p-10 text-center">
+              <UserPlus className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">No invites sent yet</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {pendingInvites.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pending</p>
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-border bg-muted/40">
+                        <tr>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Player</th>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Sent</th>
+                          <th className="px-4 py-2" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingInvites.map((req) => {
+                          const player = freePlayers.find((p) => p.id === req.player_id);
+                          return (
+                            <tr key={req.id} className="border-b border-border last:border-0">
+                              <td className="px-4 py-2.5 font-medium">
+                                {player?.full_name ?? `Player #${req.player_id}`}
+                              </td>
+                              <td className="px-4 py-2.5 text-muted-foreground">
+                                {formatRelative(req.created_at)}
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                                  disabled={cancelInviteMutation.isPending}
+                                  onClick={() => cancelInviteMutation.mutate(req.id)}
+                                >
+                                  <X className="h-3 w-3 mr-1" />
+                                  Cancel
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {pastInvites.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">History</p>
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-border bg-muted/40">
+                        <tr>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Player</th>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Responded</th>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pastInvites.map((req) => {
+                          const player = freePlayers.find((p) => p.id === req.player_id);
+                          return (
+                            <tr key={req.id} className="border-b border-border last:border-0">
+                              <td className="px-4 py-2.5 font-medium">
+                                {player?.full_name ?? `Player #${req.player_id}`}
+                              </td>
+                              <td className="px-4 py-2.5 text-muted-foreground">
+                                {formatRelative(req.responded_at ?? req.created_at)}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <StatusBadge status={req.status} />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Invite dialog */}
+          <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Invite a member to join</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground -mt-2">
+                Only free members (not currently in any club) can be invited.
+              </p>
+              <div className="space-y-1.5">
+                <Label>Member</Label>
+                {freePlayersLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading free members…</p>
+                ) : freePlayers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No free members available.</p>
+                ) : (
+                  <MemberSearchSelect
+                    value={invitePlayerId}
+                    onChange={setInvitePlayerId}
+                    members={freePlayers}
+                  />
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>Cancel</Button>
+                <Button
+                  disabled={!invitePlayerId || sendInviteMutation.isPending}
+                  onClick={() => sendInviteMutation.mutate()}
+                >
+                  {sendInviteMutation.isPending ? "Sending…" : "Send invite"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
 

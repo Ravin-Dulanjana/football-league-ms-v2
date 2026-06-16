@@ -161,6 +161,23 @@ def decide_invite(
             return None, ("Player is already in another club — invite cancelled.")
         req.status = ClubMembershipRequestStatus.ACCEPTED
         player.club_id = req.club_id
+
+        # Cancel all other pending invites for this player now that they have joined
+        other_pending = (
+            db.execute(
+                select(ClubMembershipRequest).where(
+                    ClubMembershipRequest.player_id == player.id,
+                    ClubMembershipRequest.id != req.id,
+                    ClubMembershipRequest.status == ClubMembershipRequestStatus.PENDING,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for other in other_pending:
+            other.status = ClubMembershipRequestStatus.CANCELLED
+            other.responded_at = now
+
         db.flush()
         audit_service.write_audit_log(
             db,

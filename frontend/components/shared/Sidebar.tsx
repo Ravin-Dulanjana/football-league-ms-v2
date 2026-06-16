@@ -32,7 +32,7 @@ interface NavItem {
   label: string;
   href: string;
   icon: React.ElementType;
-  roles?: string[];
+  exact?: boolean;
 }
 
 interface NavGroup {
@@ -40,93 +40,66 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Overview",
-    items: [
-      { label: "Dashboard", href: "/dashboard", icon: Home },
-      { label: "Clubs", href: "/dashboard/clubs", icon: Building2 },
-      { label: "Members", href: "/dashboard/users", icon: Users },
-      { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
-      { label: "My Profile", href: "/dashboard/profile", icon: UserCircle },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      {
-        label: "Club Roster",
-        href: "/dashboard/club-memberships",
-        icon: UserCheck,
-        roles: ["super_admin", "league_admin", "club_admin", "player"],
-      },
-      {
-        label: "Registrations",
-        href: "/dashboard/registrations",
-        icon: ClipboardList,
-        roles: ["club_admin", "club_staff", "player"],
-      },
-      {
-        label: "Releases",
-        href: "/dashboard/releases",
-        icon: FileText,
-        roles: ["club_admin", "club_staff", "player"],
-      },
-      {
-        label: "Seasons",
-        href: "/dashboard/seasons",
-        icon: ScrollText,
-        roles: ["super_admin", "league_admin", "club_admin"],
-      },
-    ],
-  },
-  {
-    label: "League Office",
-    items: [
-      {
-        label: "Squad Submissions",
-        href: "/dashboard/submissions",
-        icon: ListChecks,
-        roles: ["super_admin", "league_admin"],
-      },
-      {
-        label: "Unlock Requests",
-        href: "/dashboard/unlock-requests",
-        icon: Key,
-        roles: ["super_admin", "league_admin"],
-      },
-      {
-        label: "Analytics",
-        href: "/dashboard/analytics",
-        icon: BarChart3,
-        roles: ["super_admin", "league_admin"],
-      },
-      {
-        label: "Audit Logs",
-        href: "/dashboard/audit-logs",
-        icon: Shield,
-        roles: ["super_admin", "league_admin"],
-      },
-      {
-        label: "Reports",
-        href: "/dashboard/reports",
-        icon: BarChart3,
-        roles: ["super_admin", "league_admin", "club_admin"],
-      },
-      {
-        label: "League Info",
-        href: "/dashboard/league-info",
-        icon: Info,
-        roles: ["super_admin", "league_admin"],
-      },
-    ],
-  },
-];
-
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isLoading, role } = useCurrentUser();
+  const { user, isLoading, role, isPlayer, isClubAdmin, isLeagueLevel } = useCurrentUser();
+
+  const hasClub = !!user?.club_id;
+  // Free player = plain member (no governance role) who hasn't joined a club yet
+  const isFreePlayer = role === "player" && !hasClub;
+  // Registrations and releases are only meaningful once affiliated with a club
+  const canSeeOps = isLeagueLevel || isClubAdmin || (isPlayer && hasClub);
+
+  const NAV_GROUPS: NavGroup[] = [
+    {
+      label: "Overview",
+      items: [
+        { label: "Dashboard", href: "/dashboard", icon: Home, exact: true },
+        { label: "Clubs", href: "/dashboard/clubs", icon: Building2, exact: true },
+        { label: "Members", href: "/dashboard/users", icon: Users },
+        { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
+        { label: "My Profile", href: "/dashboard/profile", icon: UserCircle },
+        ...(hasClub
+          ? [{ label: "My Club", href: `/dashboard/clubs/${user!.club_id}`, icon: Building2 }]
+          : []),
+      ],
+    },
+    {
+      label: "Operations",
+      items: [
+        ...(isFreePlayer
+          ? [{ label: "Invites", href: "/dashboard/club-memberships", icon: UserCheck }]
+          : []),
+        ...(canSeeOps
+          ? [
+              { label: "Registrations", href: "/dashboard/registrations", icon: ClipboardList },
+              { label: "Releases", href: "/dashboard/releases", icon: FileText },
+            ]
+          : []),
+        ...(isLeagueLevel || isClubAdmin
+          ? [{ label: "Seasons", href: "/dashboard/seasons", icon: ScrollText }]
+          : []),
+      ],
+    },
+    {
+      label: "League Office",
+      items: [
+        ...(isLeagueLevel
+          ? [
+              { label: "Squad Submissions", href: "/dashboard/submissions", icon: ListChecks },
+              { label: "Unlock Requests", href: "/dashboard/unlock-requests", icon: Key },
+              { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+              { label: "Audit Logs", href: "/dashboard/audit-logs", icon: Shield },
+              { label: "League Info", href: "/dashboard/league-info", icon: Info },
+            ]
+          : []),
+        ...(isLeagueLevel || isClubAdmin
+          ? [{ label: "Reports", href: "/dashboard/reports", icon: BarChart3 }]
+          : []),
+      ],
+    },
+  ];
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -159,23 +132,18 @@ export function Sidebar() {
       {/* Nav groups */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-4">
         {NAV_GROUPS.map((group) => {
-          const visibleItems = group.items.filter(
-            (item) => !item.roles || (role && item.roles.includes(role))
-          );
-          if (visibleItems.length === 0) return null;
-
+          if (group.items.length === 0) return null;
           return (
             <div key={group.label}>
               <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-[.14em] text-muted-foreground">
                 {group.label}
               </p>
               <div className="space-y-0.5">
-                {visibleItems.map((item) => {
+                {group.items.map((item) => {
                   const Icon = item.icon;
-                  const isActive =
-                    item.href === "/dashboard"
-                      ? pathname === "/dashboard"
-                      : pathname.startsWith(item.href);
+                  const isActive = item.exact
+                    ? pathname === item.href
+                    : pathname.startsWith(item.href);
 
                   return (
                     <Link
