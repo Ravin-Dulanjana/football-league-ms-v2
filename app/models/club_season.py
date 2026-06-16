@@ -84,6 +84,7 @@ class ClubSeasonProfile(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_late: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -223,6 +224,9 @@ class UnlockApproval(Base):
     )
     approver_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approver_club_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clubs.id", ondelete="SET NULL"), nullable=True
     )
     approved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

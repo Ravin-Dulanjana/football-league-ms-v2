@@ -395,6 +395,7 @@ export interface ClubSeasonProfileRead {
   submitted_at: string | null;
   reviewed_at: string | null;
   approved_at: string | null;
+  is_late: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -457,6 +458,7 @@ export interface UnlockRequestRead {
   reason: string;
   status: UnlockRequestStatus;
   approval_count: number;
+  approver_club_ids: number[];
   created_at: string;
   decided_at: string | null;
 }

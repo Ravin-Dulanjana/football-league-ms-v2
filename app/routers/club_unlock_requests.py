@@ -32,18 +32,23 @@ router = APIRouter(prefix="/club-unlock-requests", tags=["club-unlock-requests"]
 
 
 def _to_read(req: ClubUnlockRequest, db: Session) -> dict:
-    from sqlalchemy import func, select  # noqa: PLC0415
+    from sqlalchemy import select  # noqa: PLC0415
 
-    count = db.execute(
-        select(func.count()).where(UnlockApproval.request_id == req.id)
-    ).scalar_one()
+    approvals = list(
+        db.execute(select(UnlockApproval).where(UnlockApproval.request_id == req.id))
+        .scalars()
+        .all()
+    )
     return {
         "id": req.id,
         "club_id": req.club_id,
         "season_id": req.season_id,
         "reason": req.reason,
         "status": req.status,
-        "approval_count": count,
+        "approval_count": len(approvals),
+        "approver_club_ids": [
+            a.approver_club_id for a in approvals if a.approver_club_id is not None
+        ],
         "created_at": req.created_at,
         "decided_at": req.decided_at,
     }
@@ -88,7 +93,10 @@ def decide_request(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unlock request not found.")
 
     updated, error = club_season_service.decide_unlock_request(
-        db, req, data.decision, current_user
+        db,
+        req,
+        data.decision,
+        current_user,  # type: ignore[arg-type]
     )
     if error:
         code = (

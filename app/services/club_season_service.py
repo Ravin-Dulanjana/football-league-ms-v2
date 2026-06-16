@@ -110,21 +110,17 @@ def submit_profile(
 ) -> tuple[ClubSeasonProfile | None, str | None]:
     """
     Transition to SUBMITTED (or RESUBMITTED).
-    Requires registration window open OR an active approved unlock.
+
+    During the registration window: normal submission, no approval needed beyond
+    standard league-admin review.
+
+    After the window closes: allowed as a late submission.  is_late is set to
+    True and a ClubUnlockRequest is auto-created.  Two league admins from two
+    different clubs must approve before the profile is auto-approved.
     """
     season = db.get(Season, profile.season_id)
     if season is None:
         return None, "Season not found."
-
-    window_open = is_registration_window_open(season)
-    unlock_active = _has_active_unlock(db, profile.club_id, profile.season_id)
-
-    if not window_open and not unlock_active:
-        return (
-            None,
-            "Registration window is closed and there is no active unlock "
-            "for this club.",
-        )
 
     allowed_from = {
         ClubSeasonProfileStatus.DRAFT,
@@ -138,7 +134,6 @@ def submit_profile(
             "Profile must be in draft, returned, or reviewed state.",
         )
 
-    # Enforce minimum squad size before submission.
     accepted_count = db.execute(
         select(func.count()).where(
             RegistrationRequest.club_id == profile.club_id,
@@ -153,6 +148,9 @@ def submit_profile(
             f"before submitting. Currently {accepted_count} accepted.",
         )
 
+    window_open = is_registration_window_open(season)
+    is_late = not window_open
+
     now = datetime.now(tz=UTC)
     new_status = (
         ClubSeasonProfileStatus.SUBMITTED
@@ -162,7 +160,11 @@ def submit_profile(
     profile.status = new_status
     profile.submitted_at = now
     profile.updated_at = now
+    profile.is_late = is_late
     db.flush()
+
+    if is_late:
+        _ensure_unlock_request(db, profile, current_user)
 
     audit_service.write_audit_log(
         db,
@@ -170,18 +172,30 @@ def submit_profile(
         action="club_season_profile.submit",
         entity_type="ClubSeasonProfile",
         entity_id=profile.id,
-        details={"new_status": new_status.value},
+        details={"new_status": new_status.value, "is_late": is_late},
     )
-    # Notify all league admins that a club profile has been submitted for review
-    notification_service.notify_by_role(
-        db,
-        role="league_admin",
-        event_type="club_profile.submitted",
-        message=(
-            f"Club profile (id={profile.id}) for club {profile.club_id} "
-            f"has been {new_status.value} and is awaiting review."
-        ),
-    )
+
+    if is_late:
+        notification_service.notify_by_role(
+            db,
+            role="league_admin",
+            event_type="club_profile.late_submitted",
+            message=(
+                f"Club {profile.club_id} made a LATE squad submission "
+                f"(profile id={profile.id}). Requires approval from 2 league "
+                "admins from 2 different clubs."
+            ),
+        )
+    else:
+        notification_service.notify_by_role(
+            db,
+            role="league_admin",
+            event_type="club_profile.submitted",
+            message=(
+                f"Club profile (id={profile.id}) for club {profile.club_id} "
+                f"has been {new_status.value} and is awaiting review."
+            ),
+        )
     db.commit()
     db.refresh(profile)
     return profile, None
@@ -515,12 +529,18 @@ def decide_unlock_request(
     current_user: CurrentUser,
 ) -> tuple[ClubUnlockRequest | None, str | None]:
     """
-    Each approval increments the count.  When MIN_APPROVALS is reached the
-    request transitions to APPROVED.  A rejection by any approver is final.
+    Approve or reject a late-submission unlock request.
 
-    Validation:
-      - The approver cannot be the same user who requested the unlock.
-      - The same approver cannot approve twice (DB unique constraint).
+    Approval rules:
+      - The same person cannot approve twice.
+      - Two approvals must come from league admins representing two DIFFERENT
+        clubs (tracked via approver_club_id = current_user.club_id).
+      - If the approver has no club association, they cannot approve (they
+        would not satisfy the "different clubs" requirement).
+      - When distinct approving clubs >= MIN_APPROVALS the request becomes
+        APPROVED and the linked late profile is auto-approved.
+
+    A rejection by any approver is final.
     """
     if req.requested_by == current_user.id:
         return None, "You cannot approve your own unlock request."
@@ -545,7 +565,26 @@ def decide_unlock_request(
         return req, None
 
     if decision == "approve":
-        # Check for duplicate approval (belt-and-suspenders; DB also enforces)
+        approver_club_id = current_user.club_id
+
+        if approver_club_id is None:
+            return (
+                None,
+                "You must be associated with a club to approve late submissions. "
+                "Ask a league admin who also holds a club admin role.",
+            )
+
+        # Prevent same club from approving twice
+        same_club = db.execute(
+            select(UnlockApproval).where(
+                UnlockApproval.request_id == req.id,
+                UnlockApproval.approver_club_id == approver_club_id,
+            )
+        ).scalar_one_or_none()
+        if same_club:
+            return None, "Someone from your club has already approved this request."
+
+        # Belt-and-suspenders: prevent the exact same person from approving twice
         existing = db.execute(
             select(UnlockApproval).where(
                 UnlockApproval.request_id == req.id,
@@ -558,16 +597,28 @@ def decide_unlock_request(
         approval = UnlockApproval(
             request_id=req.id,
             approver_id=current_user.id,
+            approver_club_id=approver_club_id,
         )
         db.add(approval)
         db.flush()
 
-        # Count total approvals
-        count = db.execute(
-            select(func.count()).where(UnlockApproval.request_id == req.id)
-        ).scalar_one()
+        # Check distinct approving clubs
+        all_approvals = list(
+            db.execute(
+                select(UnlockApproval).where(UnlockApproval.request_id == req.id)
+            )
+            .scalars()
+            .all()
+        )
+        distinct_clubs = len(
+            {
+                a.approver_club_id
+                for a in all_approvals
+                if a.approver_club_id is not None
+            }
+        )
 
-        if count >= MIN_APPROVALS:
+        if distinct_clubs >= MIN_APPROVALS:
             req.status = UnlockRequestStatus.APPROVED
             req.decided_at = now
             audit_service.write_audit_log(
@@ -576,8 +627,9 @@ def decide_unlock_request(
                 action="unlock_request.approve",
                 entity_type="ClubUnlockRequest",
                 entity_id=req.id,
-                details={"approvals": count},
+                details={"distinct_clubs": distinct_clubs},
             )
+            _auto_approve_late_profile(db, req, current_user)
 
         db.commit()
         db.refresh(req)
@@ -601,3 +653,72 @@ def _has_active_unlock(db: Session, club_id: int, season_id: int) -> bool:
         )
     ).scalar_one_or_none()
     return result is not None
+
+
+def _ensure_unlock_request(
+    db: Session,
+    profile: ClubSeasonProfile,
+    current_user: CurrentUser,
+) -> ClubUnlockRequest:
+    """Get or create a PENDING unlock request for this club+season (idempotent)."""
+    existing = db.execute(
+        select(ClubUnlockRequest).where(
+            ClubUnlockRequest.club_id == profile.club_id,
+            ClubUnlockRequest.season_id == profile.season_id,
+            ClubUnlockRequest.status == UnlockRequestStatus.PENDING,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return existing
+    req = ClubUnlockRequest(
+        club_id=profile.club_id,
+        season_id=profile.season_id,
+        requested_by=current_user.id,
+        reason=f"Late squad submission (profile id={profile.id})",
+        status=UnlockRequestStatus.PENDING,
+    )
+    db.add(req)
+    db.flush()
+    return req
+
+
+def _auto_approve_late_profile(
+    db: Session,
+    req: ClubUnlockRequest,
+    current_user: CurrentUser,
+) -> None:
+    """Auto-approve the late ClubSeasonProfile when its unlock request is approved."""
+    profile = db.execute(
+        select(ClubSeasonProfile).where(
+            ClubSeasonProfile.club_id == req.club_id,
+            ClubSeasonProfile.season_id == req.season_id,
+            ClubSeasonProfile.is_late.is_(True),
+            ClubSeasonProfile.status.in_(
+                [ClubSeasonProfileStatus.SUBMITTED, ClubSeasonProfileStatus.RESUBMITTED]
+            ),
+        )
+    ).scalar_one_or_none()
+    if profile is None:
+        return
+    now = datetime.now(tz=UTC)
+    profile.status = ClubSeasonProfileStatus.APPROVED
+    profile.approved_at = now
+    profile.updated_at = now
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="club_season_profile.auto_approved_late",
+        entity_type="ClubSeasonProfile",
+        entity_id=profile.id,
+    )
+    notification_service.notify_by_role(
+        db,
+        role="club_admin",
+        event_type="club_profile.late_approved",
+        message=(
+            f"Your club's late squad submission (profile id={profile.id}) "
+            "has been approved by 2 club representatives."
+        ),
+        club_id=req.club_id,
+    )
