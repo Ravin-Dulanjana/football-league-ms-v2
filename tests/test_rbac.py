@@ -76,6 +76,36 @@ def _closed_season(db: Session) -> Season:
     return season
 
 
+def _seed_accepted_players(
+    db: Session, club: Club, season: Season, count: int = 17
+) -> None:
+    """Seed accepted RegistrationRequests so submit_profile passes the min check."""
+    from app.models.player import Player  # noqa: PLC0415
+    from app.models.registration import (  # noqa: PLC0415
+        RegistrationRequest,
+        RegistrationRequestStatus,
+    )
+
+    for i in range(count):
+        player = Player(
+            league_player_code=f"SEED-{club.id}-{season.id}-{i}",
+            full_name=f"Seed Player {i}",
+            date_of_birth=date(1998, 1, 1),
+            nic_number=f"SEEDNIC{club.id}{season.id}{i:03d}",
+        )
+        db.add(player)
+        db.flush()
+        req = RegistrationRequest(
+            season_id=season.id,
+            club_id=club.id,
+            player_id=player.id,
+            requested_by_user_id=1,
+            status=RegistrationRequestStatus.ACCEPTED,
+        )
+        db.add(req)
+    db.commit()
+
+
 def _club(db: Session, name: str = "Test FC", code: str = "TFC") -> Club:
     club = Club(name=name, code=code)
     db.add(club)
@@ -267,6 +297,8 @@ def test_club_admin_can_submit_own_clubs_profile(
     db.commit()
     db.refresh(profile)
 
+    _seed_accepted_players(db, club, season)
+
     club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
     with make_client(db, club_admin) as c:
         response = c.post(f"/club-season-profiles/{profile.id}/submit/")
@@ -384,18 +416,18 @@ def test_player_cannot_decide_another_players_registration(
 # ---------------------------------------------------------------------------
 
 
-def test_club_staff_max_6_enforced(
+def test_club_staff_max_10_enforced(
     db: Session,
 ) -> None:
     """
-    POST /club-staff/ must return 400 when a club already has 6 staff for
+    POST /club-staff/ must return 400 when a club already has 10 staff for
     the season.
     """
     club = _club(db, "Staff FC", "SFC")
     season = _open_season(db)
 
-    # Add 6 staff directly via ORM
-    for i in range(6):
+    # Add 10 staff directly via ORM
+    for i in range(10):
         staff = ClubStaff(
             club_id=club.id,
             season_id=season.id,
@@ -790,6 +822,8 @@ def test_profile_submit_notifies_league_admins(db: Session) -> None:
     db.add(profile)
     db.commit()
     db.refresh(profile)
+
+    _seed_accepted_players(db, club, season)
 
     club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
     with make_client(db, club_admin) as c:

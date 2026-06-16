@@ -58,10 +58,10 @@ export interface UserCreate {
   member_type?: MemberType;
   club_id?: number;
   temporary_password: string;
-  // Player profile — required when role=player, ignored otherwise.
   full_name?: string;
   date_of_birth?: string;
   nic_number?: string;
+  phone_number?: string;
 }
 
 export interface AssignRoleRequest {
@@ -95,6 +95,14 @@ export interface AccountActionRequest {
 
 export type ClubStatus = "active" | "inactive" | "suspended";
 
+export interface PlayerMini {
+  id: number;
+  full_name: string;
+  league_player_code: string;
+  photo_key: string | null;
+  photo_url: string | null;
+}
+
 export interface ClubRead {
   id: number;
   name: string;
@@ -111,6 +119,12 @@ export interface ClubRead {
   president_name: string | null;
   secretary_name: string | null;
   treasurer_name: string | null;
+  president_player_id: number | null;
+  secretary_player_id: number | null;
+  treasurer_player_id: number | null;
+  president: PlayerMini | null;
+  secretary: PlayerMini | null;
+  treasurer: PlayerMini | null;
   created_at: string;
 }
 
@@ -140,6 +154,9 @@ export interface ClubUpdate {
   president_name?: string | null;
   secretary_name?: string | null;
   treasurer_name?: string | null;
+  president_player_id?: number | null;
+  secretary_player_id?: number | null;
+  treasurer_player_id?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +170,12 @@ export interface LeagueInfoRead {
   president_name: string | null;
   secretary_name: string | null;
   treasurer_name: string | null;
+  president_player_id: number | null;
+  secretary_player_id: number | null;
+  treasurer_player_id: number | null;
+  president: PlayerMini | null;
+  secretary: PlayerMini | null;
+  treasurer: PlayerMini | null;
   email: string | null;
   phone_number: string | null;
   logo_key: string | null;
@@ -166,6 +189,9 @@ export interface LeagueInfoUpdate {
   president_name?: string | null;
   secretary_name?: string | null;
   treasurer_name?: string | null;
+  president_player_id?: number | null;
+  secretary_player_id?: number | null;
+  treasurer_player_id?: number | null;
   email?: string | null;
   phone_number?: string | null;
   logo_key?: string | null;
@@ -190,6 +216,7 @@ export interface PlayerRead {
   full_name: string;
   date_of_birth: string; // ISO date string "YYYY-MM-DD"
   nic_number: string;
+  phone_number: string | null;
   photo_key: string | null;
   photo_url: string | null;
   club_id: number | null;

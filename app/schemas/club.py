@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, computed_field
 
 from app.models.club import ClubStatus
+from app.schemas.player import PlayerMini
 from app.services import storage
 
 
@@ -21,9 +22,17 @@ class ClubRead(BaseModel):
     cover_key: str | None
     status: ClubStatus
     established_year: int | None
+    # Legacy free-text official names (kept for backward compat)
     president_name: str | None
     secretary_name: str | None
     treasurer_name: str | None
+    # Linked player profiles for officials
+    president_player_id: int | None
+    secretary_player_id: int | None
+    treasurer_player_id: int | None
+    president: PlayerMini | None = None
+    secretary: PlayerMini | None = None
+    treasurer: PlayerMini | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -76,6 +85,9 @@ class ClubUpdate(BaseModel):
     president_name: str | None = None
     secretary_name: str | None = None
     treasurer_name: str | None = None
+    president_player_id: int | None = None
+    secretary_player_id: int | None = None
+    treasurer_player_id: int | None = None
 
 
 class UploadUrlResponse(BaseModel):

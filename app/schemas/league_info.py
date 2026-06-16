@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, computed_field
 
+from app.schemas.player import PlayerMini
 from app.services import storage
 
 
@@ -16,6 +17,12 @@ class LeagueInfoRead(BaseModel):
     president_name: str | None
     secretary_name: str | None
     treasurer_name: str | None
+    president_player_id: int | None
+    secretary_player_id: int | None
+    treasurer_player_id: int | None
+    president: PlayerMini | None = None
+    secretary: PlayerMini | None = None
+    treasurer: PlayerMini | None = None
     email: str | None
     phone_number: str | None
     logo_key: str | None
@@ -37,6 +44,9 @@ class LeagueInfoUpdate(BaseModel):
     president_name: str | None = None
     secretary_name: str | None = None
     treasurer_name: str | None = None
+    president_player_id: int | None = None
+    secretary_player_id: int | None = None
+    treasurer_player_id: int | None = None
     email: str | None = None
     phone_number: str | None = None
     logo_key: str | None = None

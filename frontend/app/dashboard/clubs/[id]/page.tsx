@@ -101,9 +101,9 @@ const editClubSchema = z.object({
       (v) => !v || (/^\d{4}$/.test(v) && Number(v) >= 1800 && Number(v) <= 2100),
       "Must be a valid 4-digit year"
     ),
-  president_name: z.string().optional().or(z.literal("")),
-  secretary_name: z.string().optional().or(z.literal("")),
-  treasurer_name: z.string().optional().or(z.literal("")),
+  president_player_id: z.number().optional().nullable(),
+  secretary_player_id: z.number().optional().nullable(),
+  treasurer_player_id: z.number().optional().nullable(),
 });
 
 type EditClubForm = z.infer<typeof editClubSchema>;
@@ -119,6 +119,12 @@ function EditClubDialog({
 }) {
   const queryClient = useQueryClient();
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: clubPlayers = [] } = useQuery<PlayerRead[]>({
+    queryKey: ["players", "club", club.id],
+    queryFn: () => playersApi.list().then((ps) => ps.filter((p) => p.club_id === club.id)),
+    enabled: open,
+  });
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(club.logo_url ?? null);
 
@@ -159,9 +165,9 @@ function EditClubDialog({
       email: club.email ?? "",
       phone_number: club.phone_number ?? "",
       established_year: club.established_year ? String(club.established_year) : "",
-      president_name: club.president_name ?? "",
-      secretary_name: club.secretary_name ?? "",
-      treasurer_name: club.treasurer_name ?? "",
+      president_player_id: club.president_player_id ?? null,
+      secretary_player_id: club.secretary_player_id ?? null,
+      treasurer_player_id: club.treasurer_player_id ?? null,
     },
   });
 
@@ -174,9 +180,9 @@ function EditClubDialog({
         email: data.email || undefined,
         phone_number: data.phone_number || undefined,
         established_year: data.established_year ? Number(data.established_year) : null,
-        president_name: data.president_name || null,
-        secretary_name: data.secretary_name || null,
-        treasurer_name: data.treasurer_name || null,
+        president_player_id: data.president_player_id ?? null,
+        secretary_player_id: data.secretary_player_id ?? null,
+        treasurer_player_id: data.treasurer_player_id ?? null,
       };
       return clubsApi.update(club.id, payload);
     },
@@ -288,18 +294,41 @@ function EditClubDialog({
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Club Officials
             </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="ec-president">President</Label>
-              <Input id="ec-president" {...form.register("president_name")} placeholder="Full name" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ec-secretary">Secretary</Label>
-              <Input id="ec-secretary" {...form.register("secretary_name")} placeholder="Full name" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ec-treasurer">Treasurer</Label>
-              <Input id="ec-treasurer" {...form.register("treasurer_name")} placeholder="Full name" />
-            </div>
+            <p className="text-xs text-muted-foreground -mt-1">
+              Link to an existing member in this club
+            </p>
+            {(["president", "secretary", "treasurer"] as const).map((role) => {
+              const fieldKey = `${role}_player_id` as keyof EditClubForm;
+              return (
+                <div key={role} className="space-y-1.5">
+                  <Label className="capitalize">{role}</Label>
+                  <Controller
+                    control={form.control}
+                    name={fieldKey}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value ? String(field.value) : "none"}
+                        onValueChange={(v) =>
+                          field.onChange(v === "none" ? null : Number(v))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Not assigned" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Not assigned</SelectItem>
+                          {clubPlayers.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.full_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <DialogFooter>
@@ -766,24 +795,42 @@ export default function ClubDetailPage() {
             ))}
           </div>
 
-          {/* Officials section — only show if any of them are set */}
-          {(club.president_name || club.secretary_name || club.treasurer_name) && (
+          {/* Officials section */}
+          {(club.president || club.secretary || club.treasurer) && (
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 Club Officials
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  { label: "President", value: club.president_name },
-                  { label: "Secretary", value: club.secretary_name },
-                  { label: "Treasurer", value: club.treasurer_name },
-                ]
-                  .filter((o) => o.value)
-                  .map(({ label, value }) => (
-                    <div key={label} className="rounded-lg border border-border bg-card p-4">
-                      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                      <p className="text-sm font-medium">{value}</p>
-                    </div>
+                {([
+                  { label: "President", official: club.president },
+                  { label: "Secretary", official: club.secretary },
+                  { label: "Treasurer", official: club.treasurer },
+                ] as { label: string; official: typeof club.president }[])
+                  .filter((o) => o.official)
+                  .map(({ label, official }) => (
+                    <button
+                      key={label}
+                      onClick={() => router.push(`/dashboard/players/${official!.id}`)}
+                      className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors text-left"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-primary/10 text-primary text-sm font-bold flex items-center justify-center shrink-0 overflow-hidden">
+                        {official!.photo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={official!.photo_url}
+                            alt={official!.full_name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          official!.full_name.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="text-sm font-medium truncate">{official!.full_name}</p>
+                      </div>
+                    </button>
                   ))}
               </div>
             </div>

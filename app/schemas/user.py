@@ -88,6 +88,7 @@ class UserCreate(BaseModel):
     full_name: str | None = None
     date_of_birth: date | None = None
     nic_number: str | None = None
+    phone_number: str | None = None
 
     @field_validator("role")
     @classmethod

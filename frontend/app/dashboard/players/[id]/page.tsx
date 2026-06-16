@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Calendar, CreditCard, ExternalLink, FileText, Hash } from "lucide-react";
+import { ArrowLeft, Calendar, CreditCard, ExternalLink, FileText, Hash, Phone } from "lucide-react";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ImageLightbox } from "@/components/shared/ImageLightbox";
@@ -160,6 +160,16 @@ export default function PlayerDetailPage() {
             <p className="text-sm font-medium mt-0.5">{formatDate(player.created_at)}</p>
           </div>
         </div>
+
+        {player.phone_number && (
+          <div className="rounded-lg border border-border bg-card p-4 flex items-start gap-3">
+            <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs text-muted-foreground">Phone</p>
+              <p className="text-sm font-medium mt-0.5">{player.phone_number}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Release history */}

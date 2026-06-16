@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -19,13 +20,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   DataTableSkeleton,
   ErrorState,
   PageHeader,
 } from "@/components/shared/DataTable";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { leagueInfoApi } from "@/lib/api";
-import type { LeagueInfoRead, LeagueInfoUpdate } from "@/types";
+import { leagueInfoApi, playersApi } from "@/lib/api";
+import type { LeagueInfoRead, LeagueInfoUpdate, PlayerRead } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Edit form
@@ -40,9 +48,9 @@ const editSchema = z.object({
       (v) => !v || (/^\d{4}$/.test(v) && Number(v) >= 1800 && Number(v) <= 2100),
       "Must be a valid 4-digit year"
     ),
-  president_name: z.string().optional().or(z.literal("")),
-  secretary_name: z.string().optional().or(z.literal("")),
-  treasurer_name: z.string().optional().or(z.literal("")),
+  president_player_id: z.number().optional().nullable(),
+  secretary_player_id: z.number().optional().nullable(),
+  treasurer_player_id: z.number().optional().nullable(),
   email: z.string().email("Invalid email").optional().or(z.literal("")),
   phone_number: z.string().optional().or(z.literal("")),
 });
@@ -60,14 +68,20 @@ function EditLeagueInfoDialog({
 }) {
   const queryClient = useQueryClient();
 
+  const { data: allPlayers = [] } = useQuery<PlayerRead[]>({
+    queryKey: ["players"],
+    queryFn: playersApi.list,
+    enabled: open,
+  });
+
   const form = useForm<EditForm>({
     resolver: zodResolver(editSchema),
     defaultValues: {
       league_name: info.league_name,
       founded_year: info.founded_year ? String(info.founded_year) : "",
-      president_name: info.president_name ?? "",
-      secretary_name: info.secretary_name ?? "",
-      treasurer_name: info.treasurer_name ?? "",
+      president_player_id: info.president_player_id ?? null,
+      secretary_player_id: info.secretary_player_id ?? null,
+      treasurer_player_id: info.treasurer_player_id ?? null,
       email: info.email ?? "",
       phone_number: info.phone_number ?? "",
     },
@@ -78,9 +92,9 @@ function EditLeagueInfoDialog({
       const payload: LeagueInfoUpdate = {
         league_name: data.league_name,
         founded_year: data.founded_year ? Number(data.founded_year) : null,
-        president_name: data.president_name || null,
-        secretary_name: data.secretary_name || null,
-        treasurer_name: data.treasurer_name || null,
+        president_player_id: data.president_player_id ?? null,
+        secretary_player_id: data.secretary_player_id ?? null,
+        treasurer_player_id: data.treasurer_player_id ?? null,
         email: data.email || null,
         phone_number: data.phone_number || null,
       };
@@ -142,18 +156,41 @@ function EditLeagueInfoDialog({
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               League Officials
             </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="li-president">President</Label>
-              <Input id="li-president" {...form.register("president_name")} placeholder="Full name" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="li-secretary">Secretary</Label>
-              <Input id="li-secretary" {...form.register("secretary_name")} placeholder="Full name" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="li-treasurer">Treasurer</Label>
-              <Input id="li-treasurer" {...form.register("treasurer_name")} placeholder="Full name" />
-            </div>
+            <p className="text-xs text-muted-foreground -mt-1">
+              Link to an existing member profile
+            </p>
+            {(["president", "secretary", "treasurer"] as const).map((role) => {
+              const fieldKey = `${role}_player_id` as keyof EditForm;
+              return (
+                <div key={role} className="space-y-1.5">
+                  <Label className="capitalize">{role}</Label>
+                  <Controller
+                    control={form.control}
+                    name={fieldKey}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value ? String(field.value) : "none"}
+                        onValueChange={(v) =>
+                          field.onChange(v === "none" ? null : Number(v))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Not assigned" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Not assigned</SelectItem>
+                          {allPlayers.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.full_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <DialogFooter>
@@ -176,6 +213,7 @@ function EditLeagueInfoDialog({
 
 export default function LeagueInfoPage() {
   const [editOpen, setEditOpen] = useState(false);
+  const router = useRouter();
   const { isLeagueLevel } = useCurrentUser();
 
   const { data: info, isLoading, error, refetch } = useQuery<LeagueInfoRead>({
@@ -187,7 +225,7 @@ export default function LeagueInfoPage() {
   if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   if (!info) return null;
 
-  const hasOfficials = info.president_name || info.secretary_name || info.treasurer_name;
+  const hasOfficials = info.president || info.secretary || info.treasurer;
 
   return (
     <div className="space-y-6">
@@ -253,17 +291,35 @@ export default function LeagueInfoPage() {
             League Officials
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { label: "President", value: info.president_name },
-              { label: "Secretary", value: info.secretary_name },
-              { label: "Treasurer", value: info.treasurer_name },
-            ]
-              .filter((o) => o.value)
-              .map(({ label, value }) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-4">
-                  <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                  <p className="text-sm font-medium">{value}</p>
-                </div>
+            {([
+              { label: "President", official: info.president },
+              { label: "Secretary", official: info.secretary },
+              { label: "Treasurer", official: info.treasurer },
+            ] as { label: string; official: typeof info.president }[])
+              .filter((o) => o.official)
+              .map(({ label, official }) => (
+                <button
+                  key={label}
+                  onClick={() => router.push(`/dashboard/players/${official!.id}`)}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors text-left"
+                >
+                  <div className="w-10 h-10 rounded-full bg-primary/10 text-primary text-sm font-bold flex items-center justify-center shrink-0 overflow-hidden">
+                    {official!.photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={official!.photo_url}
+                        alt={official!.full_name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      official!.full_name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-sm font-medium truncate">{official!.full_name}</p>
+                  </div>
+                </button>
               ))}
           </div>
         </div>
