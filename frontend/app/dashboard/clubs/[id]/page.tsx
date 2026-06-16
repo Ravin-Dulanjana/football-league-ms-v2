@@ -12,13 +12,16 @@ import {
   ArrowLeft,
   Building2,
   Camera,
+  Check,
   CheckCircle2,
+  ChevronsUpDown,
   ClipboardCheck,
   ImageIcon,
   Mail,
   Pencil,
   Phone,
   Plus,
+  Search,
   Shield,
   Shirt,
   Trash2,
@@ -36,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -75,15 +79,92 @@ import type {
 // Segment navigation
 // ---------------------------------------------------------------------------
 
-type Segment = "overview" | "players" | "staff" | "admins" | "squad";
+type Segment = "overview" | "members" | "staff" | "admins" | "squad";
 
 const SEGMENTS: { id: Segment; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Building2 },
-  { id: "players", label: "Players", icon: Shirt },
+  { id: "members", label: "Members", icon: Users },
   { id: "staff", label: "Support Staff", icon: UserSquare2 },
   { id: "admins", label: "Admins", icon: Shield },
   { id: "squad", label: "Season Squad", icon: ClipboardCheck },
 ];
+
+// ---------------------------------------------------------------------------
+// Searchable member picker (used in officials section of EditClubDialog)
+// ---------------------------------------------------------------------------
+
+function MemberSearchSelect({
+  value,
+  onChange,
+  members,
+}: {
+  value: number | null;
+  onChange: (id: number | null) => void;
+  members: { id: number; full_name: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const filtered = members.filter((m) =>
+    m.full_name.toLowerCase().includes(query.toLowerCase())
+  );
+  const selected = members.find((m) => m.id === value) ?? null;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background hover:bg-muted/50 transition-colors"
+        >
+          <span className={selected ? "" : "text-muted-foreground"}>
+            {selected ? selected.full_name : "Not assigned"}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="p-0"
+        style={{ width: "var(--radix-popover-trigger-width)" }}
+        align="start"
+      >
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+          <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <input
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            placeholder="Search by name…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <div className="max-h-48 overflow-y-auto py-1">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+            onClick={() => { onChange(null); setOpen(false); setQuery(""); }}
+          >
+            <span className="text-muted-foreground">Not assigned</span>
+            {value === null && <Check className="h-3.5 w-3.5 text-primary" />}
+          </button>
+          {filtered.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground text-center">No members found</p>
+          ) : filtered.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+              onClick={() => { onChange(m.id); setOpen(false); setQuery(""); }}
+            >
+              {m.full_name}
+              {value === m.id && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Edit club dialog
@@ -296,7 +377,7 @@ function EditClubDialog({
               Club Officials
             </p>
             <p className="text-xs text-muted-foreground -mt-1">
-              Link to an existing member in this club
+              Search and select from current club members
             </p>
             {(["president", "secretary", "treasurer"] as const).map((role) => {
               const fieldKey = `${role}_player_id` as keyof EditClubForm;
@@ -307,24 +388,11 @@ function EditClubDialog({
                     control={form.control}
                     name={fieldKey}
                     render={({ field }) => (
-                      <Select
-                        value={field.value ? String(field.value) : "none"}
-                        onValueChange={(v) =>
-                          field.onChange(v === "none" ? null : Number(v))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Not assigned" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Not assigned</SelectItem>
-                          {clubPlayers.map((p) => (
-                            <SelectItem key={p.id} value={String(p.id)}>
-                              {p.full_name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <MemberSearchSelect
+                        value={field.value as number | null}
+                        onChange={field.onChange}
+                        members={clubPlayers}
+                      />
                     )}
                   />
                 </div>
@@ -508,7 +576,7 @@ export default function ClubDetailPage() {
   const { data: allUsers = [] } = useQuery<UserRead[]>({
     queryKey: ["users"],
     queryFn: () => usersApi.list(),
-    enabled: segment === "admins",
+    enabled: segment === "admins" || segment === "members",
   });
 
   // Season / Squad segment
@@ -578,13 +646,13 @@ export default function ClubDetailPage() {
   const { data: allRegistrations = [] } = useQuery<RegistrationRequestRead[]>({
     queryKey: ["registrations"],
     queryFn: registrationsApi.list,
-    enabled: segment === "players",
+    enabled: segment === "members",
   });
 
   const { data: allPlayers = [] } = useQuery<PlayerRead[]>({
     queryKey: ["players"],
     queryFn: playersApi.list,
-    enabled: segment === "players",
+    enabled: segment === "members",
   });
 
   // Club admins: users who have club_admin in their governance_roles for this club
@@ -602,6 +670,12 @@ export default function ClubDetailPage() {
       .map((r) => r.player_id)
   );
   const clubPlayers = allPlayers.filter((p) => clubPlayerIds.has(p.id));
+
+  // Admins who don't also appear as registered players in this club
+  const adminOnlyMembers = clubAdmins.filter(
+    (a) => !a.player_id || !clubPlayerIds.has(a.player_id)
+  );
+  const totalMembers = clubPlayers.length + adminOnlyMembers.length;
 
   const deleteStaffMutation = useMutation({
     mutationFn: (id: number) => staffApi.delete(id),
@@ -847,21 +921,21 @@ export default function ClubDetailPage() {
         </div>
       )}
 
-      {segment === "players" && (
+      {segment === "members" && (
         <div>
           <p className="text-xs text-muted-foreground mb-3">
-            {clubPlayers.length} registered player{clubPlayers.length !== 1 ? "s" : ""}
+            {totalMembers} club member{totalMembers !== 1 ? "s" : ""}
           </p>
-          {clubPlayers.length === 0 ? (
+          {totalMembers === 0 ? (
             <div className="rounded-lg border border-dashed border-border p-8 text-center">
-              <Shirt className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">No players registered to this club</p>
+              <Users className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">No members in this club yet</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {clubPlayers.map((player) => (
                 <button
-                  key={player.id}
+                  key={`player-${player.id}`}
                   onClick={() => router.push(`/dashboard/players/${player.id}`)}
                   className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors text-left"
                 >
@@ -882,6 +956,21 @@ export default function ClubDetailPage() {
                     <p className="text-xs text-muted-foreground font-mono">
                       {player.league_player_code}
                     </p>
+                  </div>
+                </button>
+              ))}
+              {adminOnlyMembers.map((admin) => (
+                <button
+                  key={`admin-${admin.id}`}
+                  onClick={() => router.push(`/dashboard/users/${admin.id}`)}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors text-left"
+                >
+                  <div className="flex items-center justify-center w-9 h-9 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-xs font-bold shrink-0">
+                    {(admin.full_name ?? admin.email).split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{admin.full_name ?? admin.email}</p>
+                    <p className="text-xs text-muted-foreground truncate">Club Admin</p>
                   </div>
                 </button>
               ))}
