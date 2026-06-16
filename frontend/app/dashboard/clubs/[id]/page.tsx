@@ -707,11 +707,11 @@ export default function ClubDetailPage() {
           />
         </div>
 
-        {/* Logo + info — logo overlaps cover, text sits clearly below */}
+        {/* Logo + info — logo overlaps cover, everything else sits below */}
         <div className="px-5 pb-5">
-          {/* Logo row: overlaps cover via negative margin; edit button floats right */}
-          <div className="flex items-end justify-between -mt-10 sm:-mt-12 mb-3">
-            <div className="relative shrink-0">
+          {/* Logo only — overlaps cover via negative margin */}
+          <div className="-mt-10 sm:-mt-12 mb-3">
+            <div className="relative shrink-0 inline-block">
               <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-primary/10 text-primary font-bold text-xl flex items-center justify-center overflow-hidden border-4 border-card shadow-card">
                 {club.logo_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -726,29 +726,31 @@ export default function ClubDetailPage() {
                 )}
               </div>
             </div>
+          </div>
+          {/* Club name + badges + edit button — entirely below cover */}
+          <div className="flex items-start justify-between mb-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-serif text-xl font-semibold">{club.name}</h1>
+                <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-secondary text-muted-foreground">
+                  {club.code}
+                </span>
+                <StatusBadge status={club.status} />
+              </div>
+              {club.established_year && (
+                <p className="eyebrow mt-0.5">Est. {club.established_year}</p>
+              )}
+            </div>
             {canEdit && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setEditOpen(true)}
-                className="shrink-0"
+                className="shrink-0 ml-3"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Edit club
               </Button>
-            )}
-          </div>
-          {/* Club name + badges — separate row, sits cleanly below cover */}
-          <div className="mb-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="font-serif text-xl font-semibold">{club.name}</h1>
-              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-secondary text-muted-foreground">
-                {club.code}
-              </span>
-              <StatusBadge status={club.status} />
-            </div>
-            {club.established_year && (
-              <p className="eyebrow mt-0.5">Est. {club.established_year}</p>
             )}
           </div>
 

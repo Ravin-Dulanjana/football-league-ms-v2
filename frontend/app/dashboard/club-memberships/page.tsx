@@ -203,6 +203,8 @@ export default function ClubMembershipsPage() {
       queryFn: playersApi.list,
     });
 
+  const playerMap = Object.fromEntries((players ?? []).map((p) => [p.id, p.full_name]));
+
   const { data: requests, isLoading: reqLoading, error: reqError, refetch: refetchReqs } =
     useQuery<ClubMembershipRequestRead[]>({
       queryKey: ["club-memberships", "requests"],
@@ -388,7 +390,7 @@ export default function ClubMembershipsPage() {
                           <TableCell className="font-medium text-sm">
                             {isPlayer
                               ? (clubMap[req.club_id] ?? `Club #${req.club_id}`)
-                              : `#${req.player_id}`}
+                              : (playerMap[req.player_id] ?? `Player #${req.player_id}`)}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {formatRelative(req.created_at)}
@@ -458,7 +460,7 @@ export default function ClubMembershipsPage() {
                           <TableCell className="font-medium text-sm">
                             {isPlayer
                               ? (clubMap[req.club_id] ?? `Club #${req.club_id}`)
-                              : `#${req.player_id}`}
+                              : (playerMap[req.player_id] ?? `Player #${req.player_id}`)}
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={req.status} />
