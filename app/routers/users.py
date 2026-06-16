@@ -23,6 +23,7 @@ from app.dependencies.roles import (
     require_league_admin_or_above,
     require_super_admin,
 )
+from app.models.player import Player
 from app.models.user import User
 from app.schemas.user import (
     AccountActionRequest,
@@ -47,6 +48,13 @@ def get_me(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     user_service.attach_governance_roles(db, [user])
+    # Keep user.club_id in sync with the linked player's club.
+    # This self-heals any rows where club_id was not updated at invite-accept time.
+    if user.player_id is not None:
+        player = db.get(Player, user.player_id)
+        if player is not None and player.club_id != user.club_id:
+            user.club_id = player.club_id
+            db.commit()
     return user
 
 

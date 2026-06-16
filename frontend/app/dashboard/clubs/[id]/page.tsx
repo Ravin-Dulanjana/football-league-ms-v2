@@ -74,7 +74,6 @@ import type {
   ClubUpdate,
   PlayerRead,
   PlayerSeasonRegistrationRead,
-  RegistrationRequestRead,
   SeasonRead,
   UserRead,
 } from "@/types";
@@ -639,12 +638,6 @@ export default function ClubDetailPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const { data: allRegistrations = [] } = useQuery<RegistrationRequestRead[]>({
-    queryKey: ["registrations"],
-    queryFn: registrationsApi.list,
-    enabled: segment === "members",
-  });
-
   const { data: allPlayers = [] } = useQuery<PlayerRead[]>({
     queryKey: ["players"],
     queryFn: playersApi.list,
@@ -660,16 +653,13 @@ export default function ClubDetailPage() {
       )
   );
 
-  const clubPlayerIds = new Set(
-    allRegistrations
-      .filter((r) => r.club_id === clubId && r.status === "accepted")
-      .map((r) => r.player_id)
-  );
-  const clubPlayers = allPlayers.filter((p) => clubPlayerIds.has(p.id));
+  // Members are players whose club_id matches — set when a ClubMembershipRequest is accepted.
+  const clubPlayers = allPlayers.filter((p) => p.club_id === clubId);
+  const clubPlayerSet = new Set(clubPlayers.map((p) => p.id));
 
-  // Admins who don't also appear as registered players in this club
+  // Admins who don't also appear as club members
   const adminOnlyMembers = clubAdmins.filter(
-    (a) => !a.player_id || !clubPlayerIds.has(a.player_id)
+    (a) => !a.player_id || !clubPlayerSet.has(a.player_id)
   );
   const totalMembers = clubPlayers.length + adminOnlyMembers.length;
 
