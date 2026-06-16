@@ -686,7 +686,7 @@ export default function ClubDetailPage() {
   ];
 
   // Club invites — only fetched when own club admin views the invites tab
-  const { data: allClubRequests = [], refetch: refetchInvites } = useQuery<ClubMembershipRequestRead[]>({
+  const { data: allClubRequests = [] } = useQuery<ClubMembershipRequestRead[]>({
     queryKey: ["club-memberships", "requests"],
     queryFn: clubMembershipsApi.listRequests,
     enabled: segment === "invites" && isOwnClubAdmin,
