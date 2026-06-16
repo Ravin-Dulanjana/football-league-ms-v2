@@ -8,7 +8,7 @@ from app.db import get_db
 from app.dependencies import CurrentUser, get_current_user, require_role
 from app.models.player import Player
 from app.schemas.club import UploadUrlResponse
-from app.schemas.player import PlayerCreate, PlayerRead, PlayerUpdate
+from app.schemas.player import NicDocumentUpdate, PlayerCreate, PlayerRead, PlayerUpdate
 from app.services import player_service, storage
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -50,12 +50,15 @@ def create_player(
 def get_player(
     player_id: int,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(get_current_user),
-) -> Player:
+    current_user: CurrentUser = Depends(get_current_user),
+) -> PlayerRead:
     player = player_service.get_player_by_id(db, player_id)
     if player is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Player not found.")
-    return player
+    result = PlayerRead.model_validate(player)
+    if player.nic_document_key and _can_see_nic_document(current_user, player):
+        result.nic_document_url = storage.get_file_url(player.nic_document_key)
+    return result
 
 
 @router.patch("/{player_id}/", response_model=PlayerRead)
@@ -82,6 +85,17 @@ def update_player(
     if player is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Player not found.")
     return player_service.update_player(db, player, data)
+
+
+def _can_see_nic_document(current_user: CurrentUser, player: Player) -> bool:
+    """Returns True if caller is allowed to see this player's NIC document URL."""
+    if current_user.role in ("super_admin", "league_admin"):
+        return True
+    if current_user.player_id == player.id:
+        return True
+    if current_user.role == "club_admin" and current_user.club_id == player.club_id:
+        return True
+    return False
 
 
 @router.post(
@@ -140,3 +154,51 @@ def get_photo_upload_url(
         filename=filename,
         content_type=content_type,
     )
+
+
+@router.post(
+    "/me/nic-upload-url/",
+    response_model=UploadUrlResponse,
+    summary="Get a pre-signed URL to upload your NIC document PDF",
+)
+def get_my_nic_upload_url(
+    filename: str,
+    content_type: str = "application/pdf",
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    if not current_user.player_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No player profile linked to your account.",
+        )
+    return storage.generate_upload_url(
+        folder=f"players/{current_user.player_id}/nic-documents",
+        filename=filename,
+        content_type=content_type,
+    )
+
+
+@router.patch(
+    "/me/nic-document/",
+    response_model=PlayerRead,
+    summary="Save NIC document key after uploading to S3",
+)
+def save_my_nic_document(
+    data: NicDocumentUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> PlayerRead:
+    if not current_user.player_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No player profile linked to your account.",
+        )
+    player = player_service.get_player_by_id(db, current_user.player_id)
+    if player is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Player not found.")
+    player.nic_document_key = data.nic_document_key
+    db.commit()
+    db.refresh(player)
+    result = PlayerRead.model_validate(player)
+    result.nic_document_url = storage.get_file_url(player.nic_document_key)
+    return result

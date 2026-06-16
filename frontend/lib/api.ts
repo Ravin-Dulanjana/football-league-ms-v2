@@ -34,6 +34,7 @@ import type {
   CommentRead,
   LeagueInfoRead,
   LeagueInfoUpdate,
+  NicDocumentUpdate,
   NotificationPreferenceRead,
   NotificationPreferenceUpdate,
   NotificationRead,
@@ -212,6 +213,16 @@ export const playersApi = {
       `/players/me/photo-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
       { method: "POST" }
     ),
+  myNicUploadUrl: (filename: string, contentType = "application/pdf") =>
+    apiFetch<UploadUrlResponse>(
+      `/players/me/nic-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
+      { method: "POST" }
+    ),
+  saveMyNicDocument: (data: NicDocumentUpdate) =>
+    apiFetch<PlayerRead>("/players/me/nic-document/", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
 };
 
 // ---------------------------------------------------------------------------

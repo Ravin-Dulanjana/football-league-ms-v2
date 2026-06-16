@@ -219,10 +219,16 @@ export interface PlayerRead {
   phone_number: string | null;
   photo_key: string | null;
   photo_url: string | null;
+  // Only populated when the viewer has access (own profile, their club admin, or league admin)
+  nic_document_url: string | null;
   club_id: number | null;
   status: PlayerStatus;
   created_at: string;
   updated_at: string;
+}
+
+export interface NicDocumentUpdate {
+  nic_document_key: string;
 }
 
 export interface PlayerCreate {
