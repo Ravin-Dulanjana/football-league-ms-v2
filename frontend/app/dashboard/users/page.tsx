@@ -52,37 +52,22 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usersApi, clubsApi } from "@/lib/api";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
-import type { AccountAction, AssignRoleRequest, ClubRead, MemberType, RevokeRoleRequest, UserRead, UserRole } from "@/types";
+import type { AccountAction, AssignRoleRequest, ClubRead, RevokeRoleRequest, UserRead, UserRole } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Create user dialog
 // ---------------------------------------------------------------------------
 
-type AccountType = "player" | "club_staff" | "account";
+const createSchema = z.object({
+  email: z.string().email("Invalid email"),
+  temporary_password: z.string().min(8, "At least 8 characters"),
+  full_name: z.string().min(1, "Required"),
+  date_of_birth: z.string().min(1, "Required"),
+  nic_number: z.string().min(1, "Required"),
+  phone_number: z.string().optional(),
+});
 
-function makeCreateSchema(creatorIsClubAdmin: boolean) {
-  return z
-    .object({
-      email: z.string().email("Invalid email"),
-      // only used by league-level admins who still see the type picker
-      account_type: z.enum(["player", "club_staff", "account"] as const).optional(),
-      club_id: z.number().optional(),
-      temporary_password: z.string().min(8, "At least 8 characters"),
-      full_name: z.string().min(1, "Required"),
-      date_of_birth: z.string().min(1, "Required"),
-      nic_number: z.string().min(1, "Required"),
-      phone_number: z.string().optional(),
-    })
-    .superRefine((val, ctx) => {
-      if (
-        !creatorIsClubAdmin &&
-        val.account_type === "club_staff" &&
-        !val.club_id
-      ) {
-        ctx.addIssue({ code: "custom", path: ["club_id"], message: "Select a club" });
-      }
-    });
-}
+type CreateForm = z.infer<typeof createSchema>;
 
 function CreateUserDialog({
   open,
@@ -92,22 +77,11 @@ function CreateUserDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
-  const { isClubAdmin: creatorIsClubAdmin } = useCurrentUser();
-
-  const { data: clubs } = useQuery<ClubRead[]>({
-    queryKey: ["clubs"],
-    queryFn: clubsApi.list,
-    enabled: open && !creatorIsClubAdmin,
-  });
-
-  const schema = makeCreateSchema(creatorIsClubAdmin);
-  type CreateForm = z.infer<typeof schema>;
 
   const form = useForm<CreateForm>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(createSchema),
     defaultValues: {
       email: "",
-      account_type: creatorIsClubAdmin ? undefined : "player",
       temporary_password: "",
       full_name: "",
       date_of_birth: "",
@@ -116,64 +90,21 @@ function CreateUserDialog({
     },
   });
 
-  const accountType = form.watch("account_type") as AccountType;
-
-  const ACCOUNT_TYPE_LABELS: Record<AccountType, { label: string; hint: string }> = {
-    player: {
-      label: "Player",
-      hint: "Will appear on the player roster.",
-    },
-    club_staff: {
-      label: "Club Official",
-      hint: creatorIsClubAdmin
-        ? "Coach, physio, secretary, or any other club staff."
-        : "Staff member attached to a specific club.",
-    },
-    account: { label: "Account only", hint: "Generic login. Assign a role after creation." },
-  };
-
-  const availableTypes: AccountType[] = creatorIsClubAdmin
-    ? ["player", "club_staff"]
-    : ["player", "club_staff", "account"];
-
   const mutation = useMutation({
-    mutationFn: (data: CreateForm) => {
-      const accountType = data.account_type as AccountType | undefined;
-      const roleMap: Record<AccountType, UserRole> = {
-        player: "player",
-        club_staff: "club_staff",
-        account: "club_staff",
-      };
-      const memberTypeMap: Record<AccountType, MemberType> = {
-        player: "player",
-        club_staff: "club_staff",
-        account: "user",
-      };
-      // Club admins always create players (member with full profile)
-      const role: UserRole = creatorIsClubAdmin
-        ? "player"
-        : roleMap[accountType ?? "player"];
-      const memberType: MemberType = creatorIsClubAdmin
-        ? "player"
-        : memberTypeMap[accountType ?? "player"];
-      return usersApi.create({
+    mutationFn: (data: CreateForm) =>
+      usersApi.create({
         email: data.email,
-        role,
-        member_type: memberType,
-        club_id:
-          !creatorIsClubAdmin && accountType === "club_staff"
-            ? data.club_id
-            : undefined,
+        role: "player",
+        member_type: "player",
         temporary_password: data.temporary_password,
         full_name: data.full_name,
         date_of_birth: data.date_of_birth,
         nic_number: data.nic_number,
         phone_number: data.phone_number || undefined,
-      });
-    },
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      toast.success("Account created — they will be prompted to set a password on first login");
+      toast.success("Member added — they will be prompted to set a password on first login");
       onOpenChange(false);
       form.reset();
     },
@@ -184,65 +115,9 @@ function CreateUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{creatorIsClubAdmin ? "Add member" : "New account"}</DialogTitle>
+          <DialogTitle>Add member</DialogTitle>
         </DialogHeader>
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-
-          {/* League/super admins still see the account type picker */}
-          {!creatorIsClubAdmin && (
-            <div className="space-y-1.5">
-              <Label>Account type *</Label>
-              <div className="grid grid-cols-1 gap-2">
-                {availableTypes.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => { form.setValue("account_type", t); form.clearErrors(); }}
-                    className={cn(
-                      "flex flex-col items-start text-left px-3 py-2.5 rounded-md border text-sm transition-colors",
-                      accountType === t
-                        ? "border-primary bg-primary/5 text-foreground"
-                        : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-                    )}
-                  >
-                    <span className="font-medium">{ACCOUNT_TYPE_LABELS[t].label}</span>
-                    <span className="text-xs text-muted-foreground mt-0.5">{ACCOUNT_TYPE_LABELS[t].hint}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="u-email">Email *</Label>
-            <Input id="u-email" type="email" {...form.register("email")} />
-            {form.formState.errors.email && (
-              <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>
-            )}
-          </div>
-
-          {accountType === "club_staff" && !creatorIsClubAdmin && (
-            <div className="space-y-1.5">
-              <Label>Club *</Label>
-              <Controller
-                control={form.control}
-                name="club_id"
-                render={({ field }) => (
-                  <Select onValueChange={(v) => field.onChange(Number(v))} value={field.value ? String(field.value) : ""}>
-                    <SelectTrigger><SelectValue placeholder="Select club" /></SelectTrigger>
-                    <SelectContent>
-                      {clubs?.map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {form.formState.errors.club_id && (
-                <p className="text-xs text-destructive">{form.formState.errors.club_id.message}</p>
-              )}
-            </div>
-          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="full_name">Full name *</Label>
@@ -286,7 +161,7 @@ function CreateUserDialog({
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Creating…" : creatorIsClubAdmin ? "Add member" : "Create account"}
+              {mutation.isPending ? "Adding…" : "Add member"}
             </Button>
           </DialogFooter>
         </form>
@@ -542,11 +417,10 @@ function RoleCell({ user }: { user: UserRead }) {
   const govRoles = user.governance_roles ?? [];
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {user.member_type && <StatusBadge status={user.member_type} />}
       {govRoles.map((gr, i) => (
         <StatusBadge key={`${gr.role}-${i}`} status={gr.role} />
       ))}
-      {!user.member_type && govRoles.length === 0 && <StatusBadge status={user.role} />}
+      {govRoles.length === 0 && <StatusBadge status={user.role} />}
     </div>
   );
 }
