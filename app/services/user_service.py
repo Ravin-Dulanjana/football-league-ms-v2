@@ -136,21 +136,19 @@ def create_user(
     """
     # Enforce creation hierarchy:
     #   super_admin  → any role
-    #   league_admin → league_admin, club_admin, player, club_staff (not super_admin)
-    #   club_admin   → player or club_staff only (club_id auto-injected below)
+    #   league_admin → league_admin, club_admin, player (not super_admin)
+    #   club_admin   → player only (club_id auto-injected below)
     role = current_user.role
     target_role = data.role
     if role == "league_admin" and target_role == "super_admin":
         return None, "League admins cannot create super_admin accounts."
-    if role == "club_admin" and target_role not in ("player", "club_staff"):
-        return None, "Club admins can only create player or club_staff accounts."
+    if role == "club_admin" and target_role != "player":
+        return None, "Club admins can only create member accounts."
 
-    # When a club_admin creates a player or club_staff, auto-assign their club.
+    # When a club_admin creates a member, auto-assign their club.
     club_id = data.club_id
     if role == "club_admin" and club_id is None:
         club_id = current_user.club_id
-    if role == "club_admin" and target_role == "club_staff" and club_id is None:
-        return None, "Club admins must be linked to a club to create staff accounts."
 
     # Check email is not already taken
     existing = db.execute(
@@ -166,12 +164,7 @@ def create_user(
     #   "user"       — unplaced / no specific club identity yet
     member_type = data.member_type
     if member_type is None:
-        if target_role == "player":
-            member_type = "player"
-        elif target_role == "club_staff":
-            member_type = "club_staff"
-        else:
-            member_type = "user"
+        member_type = "player" if target_role == "player" else "user"
 
     # Create an identity record (player profile) whenever personal details are
     # provided, regardless of account type.  For member_type="player" this is
@@ -406,7 +399,7 @@ def _check_role_permission(
     if caller.role == "super_admin":
         return None
     if caller.role == "league_admin":
-        if target_role not in ("league_admin", "club_admin", "player", "club_staff"):
+        if target_role not in ("league_admin", "club_admin"):
             return f"League admins cannot manage the '{target_role}' role."
         return None
     if caller.role == "club_admin":
@@ -427,12 +420,14 @@ def assign_role(
     current_user: CurrentUser,
 ) -> tuple[User | None, str | None]:
     """
-    Add a governance role to a user.
+    Add a governance role (league_admin or club_admin) to a user.
 
     Caller permissions: super_admin > league_admin > club_admin (own club only).
     Roles are ADDITIVE — assigning league_admin to a club_admin keeps both.
-    Assigning a base role (player / club_staff) clears all governance roles.
+    To remove a governance role use revoke_governance_role instead.
     """
+    if new_role not in ("league_admin", "club_admin"):
+        return None, "Only league_admin and club_admin roles can be assigned."
     perm_err = _check_role_permission(current_user, new_role, new_club_id)
     if perm_err:
         return None, perm_err
@@ -448,87 +443,56 @@ def assign_role(
 
     old_role = target.role
 
-    if new_role in ("player", "club_staff"):
-        # Stepping down — remove all governance roles from junction table
+    # Add/update governance role in junction table
+    existing = (
+        db.execute(
+            select(UserGovernanceRole).where(
+                UserGovernanceRole.user_id == target.id,
+                UserGovernanceRole.role == new_role,
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    if existing:
+        if new_role == "club_admin":
+            existing.club_id = new_club_id
+        existing.assigned_by_id = current_user.id
+        existing.reason = reason
+    else:
+        db.add(
+            UserGovernanceRole(
+                user_id=target.id,
+                role=new_role,
+                club_id=new_club_id if new_role == "club_admin" else None,
+                assigned_by_id=current_user.id,
+                reason=reason,
+            )
+        )
+
+    db.flush()
+
+    # Recompute highest role from junction table
+    all_gov_roles = list(
         db.execute(
             select(UserGovernanceRole).where(UserGovernanceRole.user_id == target.id)
         )
-        existing_govs = list(
-            db.execute(
-                select(UserGovernanceRole).where(
-                    UserGovernanceRole.user_id == target.id
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for row in existing_govs:
-            db.delete(row)
+        .scalars()
+        .all()
+    )
+    role_names = [r.role for r in all_gov_roles]
+    top_role = highest_role(role_names)
+    target.role = top_role
 
-        target.role = new_role
-        # For club_staff stepping down, keep club_id if provided
-        if new_club_id is not None:
-            target.club_id = new_club_id
-        elif old_role == "club_admin":
-            target.club_id = None
-        _cognito_update_role(target.cognito_sub, new_role, target.club_id)
-    else:
-        # Adding/updating a governance role — append to junction table
-        # If the same role (and same club for club_admin) already exists, skip
-        existing = (
-            db.execute(
-                select(UserGovernanceRole).where(
-                    UserGovernanceRole.user_id == target.id,
-                    UserGovernanceRole.role == new_role,
-                )
-            )
-            .scalars()
-            .first()
-        )
+    # club_id on users row = the club from the club_admin entry (if any)
+    club_admin_entry = next((r for r in all_gov_roles if r.role == "club_admin"), None)
+    if club_admin_entry:
+        target.club_id = club_admin_entry.club_id
+    elif new_club_id is not None:
+        target.club_id = new_club_id
 
-        if existing:
-            # Update in-place (e.g. re-assigning club_admin to a different club)
-            if new_role == "club_admin":
-                existing.club_id = new_club_id
-            existing.assigned_by_id = current_user.id
-            existing.reason = reason
-        else:
-            db.add(
-                UserGovernanceRole(
-                    user_id=target.id,
-                    role=new_role,
-                    club_id=new_club_id if new_role == "club_admin" else None,
-                    assigned_by_id=current_user.id,
-                    reason=reason,
-                )
-            )
-
-        db.flush()
-
-        # Recompute highest role from junction table
-        all_gov_roles = list(
-            db.execute(
-                select(UserGovernanceRole).where(
-                    UserGovernanceRole.user_id == target.id
-                )
-            )
-            .scalars()
-            .all()
-        )
-        role_names = [r.role for r in all_gov_roles]
-        top_role = highest_role(role_names)
-        target.role = top_role
-
-        # club_id on users row = the club from the club_admin entry (if any)
-        club_admin_entry = next(
-            (r for r in all_gov_roles if r.role == "club_admin"), None
-        )
-        if club_admin_entry:
-            target.club_id = club_admin_entry.club_id
-        elif new_club_id is not None:
-            target.club_id = new_club_id
-
-        _cognito_update_role(target.cognito_sub, top_role, target.club_id)
+    _cognito_update_role(target.cognito_sub, top_role, target.club_id)
 
     db.flush()
     audit_service.write_audit_log(

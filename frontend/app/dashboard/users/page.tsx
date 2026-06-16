@@ -184,7 +184,7 @@ function CreateUserDialog({
 
 const assignRoleSchema = z
   .object({
-    new_role: z.enum(["league_admin", "club_admin", "club_staff", "player"] as const),
+    new_role: z.enum(["league_admin", "club_admin"] as const),
     club_id: z.number().optional(),
     reason: z.string().min(1, "Reason is required"),
   })
@@ -223,12 +223,12 @@ function AssignRoleDialog({
   // roles the caller is permitted to assign
   const assignableRoles = isCallerClubAdmin
     ? (["club_admin"] as const)
-    : (["league_admin", "club_admin", "club_staff", "player"] as const);
+    : (["league_admin", "club_admin"] as const);
 
   const form = useForm<AssignRoleForm>({
     resolver: zodResolver(assignRoleSchema),
     defaultValues: {
-      new_role: isCallerClubAdmin ? "club_admin" : "player",
+      new_role: isCallerClubAdmin ? "club_admin" : "league_admin",
       club_id: isCallerClubAdmin && callerClubId ? callerClubId : undefined,
       reason: "",
     },
@@ -245,10 +245,9 @@ function AssignRoleDialog({
       };
       return usersApi.assignRole(user!.id, payload);
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      const isStepDown = ["player", "club_staff"].includes(variables.new_role);
-      toast.success(isStepDown ? "Role updated — all governance roles cleared" : "Role added successfully");
+      toast.success("Role added successfully");
       toast.info("The user must log out and back in for role changes to take effect.", { duration: 7000 });
       onOpenChange(false);
       form.reset();
@@ -275,8 +274,7 @@ function AssignRoleDialog({
               </p>
             )}
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Governance roles are <strong>additive</strong> — assigning league_admin keeps existing club_admin.
-              Assigning player/club_staff clears all governance roles.
+              Governance roles are <strong>additive</strong> — assigning league admin keeps existing club admin.
             </p>
           </div>
         )}
@@ -428,7 +426,7 @@ function RoleCell({ user }: { user: UserRead }) {
       {govRoles.map((gr, i) => (
         <StatusBadge key={`${gr.role}-${i}`} status={gr.role} />
       ))}
-      {govRoles.length === 0 && <StatusBadge status={user.role} />}
+      {govRoles.length === 0 && <StatusBadge status="member" />}
     </div>
   );
 }

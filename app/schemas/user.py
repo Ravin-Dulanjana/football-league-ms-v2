@@ -7,8 +7,8 @@ from datetime import date, datetime
 from pydantic import BaseModel, field_validator, model_validator
 
 # Valid role values — kept in one place so schemas and tests both import from here.
-VALID_ROLES = {"super_admin", "league_admin", "club_admin", "player", "club_staff"}
-VALID_MEMBER_TYPES = {"player", "club_staff", "user"}
+VALID_ROLES = {"super_admin", "league_admin", "club_admin", "player"}
+VALID_MEMBER_TYPES = {"player", "user"}
 
 # Roles that carry governance meaning (shown as extra tags in the UI)
 GOVERNANCE_ROLES = frozenset({"super_admin", "league_admin", "club_admin"})
@@ -18,7 +18,6 @@ _ROLE_RANK: dict[str, int] = {
     "super_admin": 50,
     "league_admin": 40,
     "club_admin": 30,
-    "club_staff": 20,
     "player": 10,
 }
 
