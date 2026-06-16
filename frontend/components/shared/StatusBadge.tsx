@@ -39,9 +39,9 @@ const STATUS_STYLES: Record<string, string> = {
   locked: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
   unlocked: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
 
-  // Identity (member_type)
-  player: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-  club_staff: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+  // Base role
+  player: "bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400",
+  member: "bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400",
   user: "bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400",
 
   // Governance roles
@@ -58,9 +58,10 @@ const STATUS_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
   league_admin: "League Admin",
   club_admin: "Club Admin",
-  // Identity
-  club_staff: "Club Staff",
-  user: "User",
+  // Base member
+  player: "Member",
+  member: "Member",
+  user: "Member",
 };
 
 interface StatusBadgeProps {
