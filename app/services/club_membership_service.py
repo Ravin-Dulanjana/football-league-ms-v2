@@ -27,6 +27,7 @@ from app.models.club_membership import (
     ClubMembershipRequestStatus,
 )
 from app.models.player import Player
+from app.models.user import User
 from app.schemas.club_membership import ClubMembershipRequestCreate
 from app.services import audit_service
 
@@ -162,6 +163,13 @@ def decide_invite(
         req.status = ClubMembershipRequestStatus.ACCEPTED
         player.club_id = req.club_id
 
+        # Keep User.club_id in sync so /users/me/ returns the new club immediately.
+        linked_user = db.execute(
+            select(User).where(User.player_id == player.id)
+        ).scalar_one_or_none()
+        if linked_user is not None:
+            linked_user.club_id = req.club_id
+
         # Cancel all other pending invites for this player now that they have joined
         other_pending = (
             db.execute(
@@ -237,6 +245,14 @@ def release_player(
         return None, "Player is not currently in any club."
 
     player.club_id = None
+
+    # Keep User.club_id in sync so /users/me/ reflects the release immediately.
+    linked_user = db.execute(
+        select(User).where(User.player_id == player.id)
+    ).scalar_one_or_none()
+    if linked_user is not None:
+        linked_user.club_id = None
+
     db.commit()
     db.refresh(player)
     audit_service.write_audit_log(
