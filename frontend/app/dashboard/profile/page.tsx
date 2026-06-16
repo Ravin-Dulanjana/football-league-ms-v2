@@ -10,8 +10,10 @@ import {
   Building2,
   CalendarDays,
   Camera,
+  CreditCard,
   Mail,
   Pencil,
+  Phone,
   Shield,
   User,
 } from "lucide-react";
@@ -334,16 +336,9 @@ export default function ProfilePage() {
       {player && (
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-            Player Details
+            My Details
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
-                <Shield className="h-3 w-3" />
-                Player code
-              </p>
-              <p className="text-sm font-mono font-medium">{player.league_player_code}</p>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-lg border border-border bg-card p-4">
               <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
                 <CalendarDays className="h-3 w-3" />
@@ -352,8 +347,27 @@ export default function ProfilePage() {
               <p className="text-sm font-medium">{player.date_of_birth}</p>
             </div>
             <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground mb-1">Status</p>
-              <StatusBadge status={player.status} />
+              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
+                <CreditCard className="h-3 w-3" />
+                NIC number
+              </p>
+              <p className="text-sm font-mono font-medium">{player.nic_number}</p>
+            </div>
+            {player.phone_number && (
+              <div className="rounded-lg border border-border bg-card p-4">
+                <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
+                  <Phone className="h-3 w-3" />
+                  Phone
+                </p>
+                <p className="text-sm font-medium">{player.phone_number}</p>
+              </div>
+            )}
+            <div className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
+                <Shield className="h-3 w-3" />
+                Player code
+              </p>
+              <p className="text-sm font-mono font-medium">{player.league_player_code}</p>
             </div>
           </div>
         </div>

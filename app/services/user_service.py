@@ -191,6 +191,7 @@ def create_user(
                     full_name=data.full_name,  # type: ignore[arg-type]
                     date_of_birth=data.date_of_birth,  # type: ignore[arg-type]
                     nic_number=data.nic_number,  # type: ignore[arg-type]
+                    phone_number=data.phone_number,
                 ),
             )
         except Exception:

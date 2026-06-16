@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import enum
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from app.models.player import Player
 
 from app.models.base import Base
 
@@ -38,6 +44,30 @@ class Club(Base):
     president_name: Mapped[str | None] = mapped_column(String(128))
     secretary_name: Mapped[str | None] = mapped_column(String(128))
     treasurer_name: Mapped[str | None] = mapped_column(String(128))
+    president_player_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("players.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+    )
+    secretary_player_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("players.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+    )
+    treasurer_player_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("players.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+    )
+    president: Mapped[Player | None] = relationship(
+        "Player", foreign_keys=[president_player_id], lazy="select"
+    )
+    secretary: Mapped[Player | None] = relationship(
+        "Player", foreign_keys=[secretary_player_id], lazy="select"
+    )
+    treasurer: Mapped[Player | None] = relationship(
+        "Player", foreign_keys=[treasurer_player_id], lazy="select"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

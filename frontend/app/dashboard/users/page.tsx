@@ -64,24 +64,22 @@ function makeCreateSchema(creatorIsClubAdmin: boolean) {
   return z
     .object({
       email: z.string().email("Invalid email"),
-      account_type: z.enum(["player", "club_staff", "account"] as const),
+      // only used by league-level admins who still see the type picker
+      account_type: z.enum(["player", "club_staff", "account"] as const).optional(),
       club_id: z.number().optional(),
       temporary_password: z.string().min(8, "At least 8 characters"),
       full_name: z.string().min(1, "Required"),
-      date_of_birth: z.string().optional(),
-      nic_number: z.string().optional(),
+      date_of_birth: z.string().min(1, "Required"),
+      nic_number: z.string().min(1, "Required"),
+      phone_number: z.string().optional(),
     })
     .superRefine((val, ctx) => {
-      if (val.account_type === "club_staff" && !creatorIsClubAdmin && !val.club_id) {
+      if (
+        !creatorIsClubAdmin &&
+        val.account_type === "club_staff" &&
+        !val.club_id
+      ) {
         ctx.addIssue({ code: "custom", path: ["club_id"], message: "Select a club" });
-      }
-      if (val.account_type === "player") {
-        if (!val.date_of_birth) {
-          ctx.addIssue({ code: "custom", path: ["date_of_birth"], message: "Required for players" });
-        }
-        if (!val.nic_number) {
-          ctx.addIssue({ code: "custom", path: ["nic_number"], message: "Required for players" });
-        }
       }
     });
 }
@@ -109,11 +107,12 @@ function CreateUserDialog({
     resolver: zodResolver(schema),
     defaultValues: {
       email: "",
-      account_type: "player",
+      account_type: creatorIsClubAdmin ? undefined : "player",
       temporary_password: "",
       full_name: "",
       date_of_birth: "",
       nic_number: "",
+      phone_number: "",
     },
   });
 
@@ -122,15 +121,15 @@ function CreateUserDialog({
   const ACCOUNT_TYPE_LABELS: Record<AccountType, { label: string; hint: string }> = {
     player: {
       label: "Player",
-      hint: "Will appear on the player roster. Needs NIC and date of birth for league registration.",
+      hint: "Will appear on the player roster.",
     },
     club_staff: {
       label: "Club Official",
       hint: creatorIsClubAdmin
-        ? "Coach, physio, secretary, or any other club staff. No extra details needed."
+        ? "Coach, physio, secretary, or any other club staff."
         : "Staff member attached to a specific club.",
     },
-    account: { label: "Account only", hint: "Generic login with no club yet. Assign a role after creation." },
+    account: { label: "Account only", hint: "Generic login. Assign a role after creation." },
   };
 
   const availableTypes: AccountType[] = creatorIsClubAdmin
@@ -139,6 +138,7 @@ function CreateUserDialog({
 
   const mutation = useMutation({
     mutationFn: (data: CreateForm) => {
+      const accountType = data.account_type as AccountType | undefined;
       const roleMap: Record<AccountType, UserRole> = {
         player: "player",
         club_staff: "club_staff",
@@ -149,15 +149,26 @@ function CreateUserDialog({
         club_staff: "club_staff",
         account: "user",
       };
+      // Club admins always create players (member with full profile)
+      const role: UserRole = creatorIsClubAdmin
+        ? "player"
+        : roleMap[accountType ?? "player"];
+      const memberType: MemberType = creatorIsClubAdmin
+        ? "player"
+        : memberTypeMap[accountType ?? "player"];
       return usersApi.create({
         email: data.email,
-        role: roleMap[data.account_type as AccountType],
-        member_type: memberTypeMap[data.account_type as AccountType],
-        club_id: !creatorIsClubAdmin && data.account_type === "club_staff" ? data.club_id : undefined,
+        role,
+        member_type: memberType,
+        club_id:
+          !creatorIsClubAdmin && accountType === "club_staff"
+            ? data.club_id
+            : undefined,
         temporary_password: data.temporary_password,
         full_name: data.full_name,
         date_of_birth: data.date_of_birth,
         nic_number: data.nic_number,
+        phone_number: data.phone_number || undefined,
       });
     },
     onSuccess: () => {
@@ -175,33 +186,32 @@ function CreateUserDialog({
         <DialogHeader>
           <DialogTitle>{creatorIsClubAdmin ? "Add member" : "New account"}</DialogTitle>
         </DialogHeader>
-        {creatorIsClubAdmin && (
-          <p className="text-sm text-muted-foreground -mt-2">
-            Choose if this person is a player or a club official. You can always update their details later.
-          </p>
-        )}
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>{creatorIsClubAdmin ? "Member type *" : "Account type *"}</Label>
-            <div className="grid grid-cols-1 gap-2">
-              {availableTypes.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => { form.setValue("account_type", t); form.clearErrors(); }}
-                  className={cn(
-                    "flex flex-col items-start text-left px-3 py-2.5 rounded-md border text-sm transition-colors",
-                    accountType === t
-                      ? "border-primary bg-primary/5 text-foreground"
-                      : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-                  )}
-                >
-                  <span className="font-medium">{ACCOUNT_TYPE_LABELS[t].label}</span>
-                  <span className="text-xs text-muted-foreground mt-0.5">{ACCOUNT_TYPE_LABELS[t].hint}</span>
-                </button>
-              ))}
+
+          {/* League/super admins still see the account type picker */}
+          {!creatorIsClubAdmin && (
+            <div className="space-y-1.5">
+              <Label>Account type *</Label>
+              <div className="grid grid-cols-1 gap-2">
+                {availableTypes.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => { form.setValue("account_type", t); form.clearErrors(); }}
+                    className={cn(
+                      "flex flex-col items-start text-left px-3 py-2.5 rounded-md border text-sm transition-colors",
+                      accountType === t
+                        ? "border-primary bg-primary/5 text-foreground"
+                        : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+                    )}
+                  >
+                    <span className="font-medium">{ACCOUNT_TYPE_LABELS[t].label}</span>
+                    <span className="text-xs text-muted-foreground mt-0.5">{ACCOUNT_TYPE_LABELS[t].hint}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="u-email">Email *</Label>
@@ -242,25 +252,27 @@ function CreateUserDialog({
             )}
           </div>
 
-          {accountType === "player" && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="date_of_birth">Date of birth *</Label>
-                <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
-                {form.formState.errors.date_of_birth && (
-                  <p className="text-xs text-destructive">{form.formState.errors.date_of_birth.message}</p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="nic_number">NIC number *</Label>
-                <Input id="nic_number" {...form.register("nic_number")} placeholder="e.g. 901234567V" />
-                <p className="text-xs text-muted-foreground">Required for official league registration</p>
-                {form.formState.errors.nic_number && (
-                  <p className="text-xs text-destructive">{form.formState.errors.nic_number.message}</p>
-                )}
-              </div>
-            </>
-          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="date_of_birth">Date of birth *</Label>
+            <Input id="date_of_birth" type="date" {...form.register("date_of_birth")} />
+            {form.formState.errors.date_of_birth && (
+              <p className="text-xs text-destructive">{form.formState.errors.date_of_birth.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="nic_number">NIC number *</Label>
+            <Input id="nic_number" {...form.register("nic_number")} placeholder="e.g. 901234567V" />
+            <p className="text-xs text-muted-foreground">Required for official league registration</p>
+            {form.formState.errors.nic_number && (
+              <p className="text-xs text-destructive">{form.formState.errors.nic_number.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="phone_number">Phone number</Label>
+            <Input id="phone_number" type="tel" {...form.register("phone_number")} placeholder="e.g. 0771234567" />
+          </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="tmp-pw">Temporary password *</Label>
