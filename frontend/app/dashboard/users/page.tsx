@@ -52,7 +52,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usersApi, clubsApi } from "@/lib/api";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
-import type { AccountAction, AssignRoleRequest, ClubRead, RevokeRoleRequest, UserRead, UserRole } from "@/types";
+import type { AccountAction, AssignRoleRequest, ClubRead, RevokeRoleRequest, UserRead } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Create user dialog
