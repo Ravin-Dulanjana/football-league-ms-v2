@@ -69,6 +69,7 @@ def get_user(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     user_service.attach_governance_roles(db, [user])
+    user_service.attach_player_names(db, [user])
     return user
 
 
