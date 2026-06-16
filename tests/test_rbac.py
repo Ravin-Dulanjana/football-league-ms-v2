@@ -503,6 +503,9 @@ def test_club_unlock_requires_two_approvals(
     """
     club = _club(db, "Unlock FC", "UFC")
     season = _closed_season(db)
+    # Two separate clubs whose admins will approve the late submission
+    approver_club1 = _club(db, "Approver Club A", "ACA")
+    approver_club2 = _club(db, "Approver Club B", "ACB")
 
     req = ClubUnlockRequest(
         club_id=club.id,
@@ -515,10 +518,10 @@ def test_club_unlock_requires_two_approvals(
     db.commit()
     db.refresh(req)
 
-    admin1 = CurrentUser(id=11, role="league_admin")
-    admin2 = CurrentUser(id=12, role="league_admin")
+    admin1 = CurrentUser(id=11, role="league_admin", club_id=approver_club1.id)
+    admin2 = CurrentUser(id=12, role="league_admin", club_id=approver_club2.id)
 
-    # First approval — still pending
+    # First approval — still pending (only 1 distinct club so far)
     with make_client(db, admin1) as c:
         r1 = c.post(
             f"/club-unlock-requests/{req.id}/decide/",
@@ -528,7 +531,7 @@ def test_club_unlock_requires_two_approvals(
     assert r1.json()["status"] == "pending"
     assert r1.json()["approval_count"] == 1
 
-    # Second approval by a different admin — now approved
+    # Second approval by admin from a different club — now approved
     with make_client(db, admin2) as c:
         r2 = c.post(
             f"/club-unlock-requests/{req.id}/decide/",
