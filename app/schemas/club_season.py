@@ -24,6 +24,7 @@ class ClubSeasonProfileRead(BaseModel):
     submitted_at: datetime | None
     reviewed_at: datetime | None
     approved_at: datetime | None
+    is_late: bool
     created_at: datetime
     updated_at: datetime
 
@@ -129,6 +130,7 @@ class UnlockRequestRead(BaseModel):
     reason: str
     status: str
     approval_count: int
+    approver_club_ids: list[int]
     created_at: datetime
     decided_at: datetime | None
 

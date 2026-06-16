@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, ExternalLink, FileText, ListChecks } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, FileText, ListChecks } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -200,7 +200,18 @@ function SubmissionRow({
         </TableCell>
         <TableCell className="text-sm">{season?.name ?? `Season ${profile.season_id}`}</TableCell>
         <TableCell>
-          <StatusBadge status={profile.status} />
+          <div className="flex items-center gap-1.5">
+            <StatusBadge status={profile.status} />
+            {profile.is_late && (
+              <span
+                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                title="Late submission — requires 2 club approvals"
+              >
+                <AlertTriangle className="h-2.5 w-2.5" />
+                Late
+              </span>
+            )}
+          </div>
         </TableCell>
         <TableCell className="text-sm text-muted-foreground">
           {profile.submitted_at ? formatDate(profile.submitted_at) : "—"}

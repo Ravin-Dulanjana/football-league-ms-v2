@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
   Building2,
   Camera,
@@ -478,6 +479,7 @@ export default function ClubDetailPage() {
   const [addStaffOpen, setAddStaffOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteStaffTarget, setDeleteStaffTarget] = useState<ClubStaffRead | null>(null);
+  const [lateSubmitConfirmOpen, setLateSubmitConfirmOpen] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -516,6 +518,10 @@ export default function ClubDetailPage() {
     enabled: segment === "squad",
   });
   const currentSeason = seasons.find((s) => s.status === "open") ?? seasons[seasons.length - 1];
+  const isRegistrationWindowOpen = currentSeason
+    ? new Date() >= new Date(currentSeason.registration_open_at) &&
+      new Date() <= new Date(currentSeason.registration_close_at)
+    : false;
 
   const { data: profiles = [] } = useQuery<ClubSeasonProfileRead[]>({
     queryKey: ["profiles"],
@@ -1004,20 +1010,39 @@ export default function ClubDetailPage() {
                       currentProfile.status === "returned") && (
                       <Button
                         size="sm"
-                        onClick={() => submitMutation.mutate()}
+                        onClick={() => {
+                          if (!isRegistrationWindowOpen) {
+                            setLateSubmitConfirmOpen(true);
+                          } else {
+                            submitMutation.mutate();
+                          }
+                        }}
                         disabled={submitMutation.isPending || squadRegistrations.length === 0}
                         className="gap-1.5"
+                        variant={!isRegistrationWindowOpen ? "outline" : "default"}
                       >
-                        <CheckCircle2 className="h-4 w-4" />
+                        {!isRegistrationWindowOpen && (
+                          <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        )}
+                        {!isRegistrationWindowOpen && <CheckCircle2 className="h-4 w-4" />}
+                        {isRegistrationWindowOpen && <CheckCircle2 className="h-4 w-4" />}
                         {submitMutation.isPending ? "Submitting…" : "Submit squad list"}
                       </Button>
                     )}
-                  {currentProfile?.status === "submitted" ||
-                  currentProfile?.status === "resubmitted" ? (
-                    <p className="text-xs text-muted-foreground">
-                      Submitted {formatDate(currentProfile.submitted_at)}
-                    </p>
-                  ) : null}
+                  {(currentProfile?.status === "submitted" ||
+                    currentProfile?.status === "resubmitted") && (
+                    <div className="flex flex-col items-end gap-0.5">
+                      <p className="text-xs text-muted-foreground">
+                        {currentProfile.is_late ? "Late submission — " : ""}
+                        Submitted {formatDate(currentProfile.submitted_at)}
+                      </p>
+                      {currentProfile.is_late && (
+                        <p className="text-xs text-amber-600 font-medium">
+                          Awaiting approval from 2 league admins
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1152,6 +1177,19 @@ export default function ClubDetailPage() {
           onConfirm={() => deleteStaffMutation.mutate(deleteStaffTarget.id)}
         />
       )}
+
+      <ConfirmDialog
+        open={lateSubmitConfirmOpen}
+        onOpenChange={(v) => { if (!v) setLateSubmitConfirmOpen(false); }}
+        title="Submit after registration window?"
+        description="The registration window is closed. This is a late submission — it will require approval from 2 league admins from 2 different clubs before it is accepted. Only do this for genuine reasons (injury, mistake, exceptional circumstances)."
+        confirmLabel="Submit anyway"
+        loading={submitMutation.isPending}
+        onConfirm={() => {
+          setLateSubmitConfirmOpen(false);
+          submitMutation.mutate();
+        }}
+      />
 
       <ImageLightbox
         src={lightboxSrc ?? ""}
