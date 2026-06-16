@@ -658,7 +658,7 @@ export default function ClubDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* Back */}
       <button
         onClick={() => router.back()}
@@ -671,7 +671,7 @@ export default function ClubDetailPage() {
       {/* Club header card with cover photo */}
       <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-card">
         {/* Cover photo banner */}
-        <div className="relative h-56 sm:h-72 bg-secondary">
+        <div className="relative h-72 sm:h-96 bg-secondary">
           {club.cover_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
