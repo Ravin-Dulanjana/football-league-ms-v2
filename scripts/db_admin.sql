@@ -46,10 +46,13 @@ DELETE FROM player_season_registrations;
 DELETE FROM release_documents;
 
 -- Wipe releases
-DELETE FROM releases;
+DELETE FROM player_releases;
 
--- Wipe club season profile comments
-DELETE FROM club_season_profile_comments;
+-- Wipe club season comments
+DELETE FROM club_season_comments;
+
+-- Wipe unlock approvals (child of club_unlock_requests)
+DELETE FROM unlock_approvals;
 
 -- Wipe club unlock requests
 DELETE FROM club_unlock_requests;
