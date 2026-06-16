@@ -84,7 +84,7 @@ def attach_governance_roles(db: Session, users: list[User]) -> list[User]:
 
 
 def attach_player_names(db: Session, users: list[User]) -> list[User]:
-    """Populate user.full_name from the linked Player for player-type users."""
+    """Populate user.full_name and sync user.club_id from the linked Player."""
     player_ids = [u.player_id for u in users if u.player_id is not None]
     if not player_ids:
         return users
@@ -92,9 +92,16 @@ def attach_player_names(db: Session, users: list[User]) -> list[User]:
         db.execute(select(Player).where(Player.id.in_(player_ids))).scalars().all()
     )
     name_map = {p.id: p.full_name for p in players}
+    club_map = {p.id: p.club_id for p in players}
+    needs_commit = False
     for user in users:
         if user.player_id and user.player_id in name_map:
             user.full_name = name_map[user.player_id]  # type: ignore[attr-defined]
+        if user.player_id is not None and club_map.get(user.player_id) != user.club_id:
+            user.club_id = club_map.get(user.player_id)
+            needs_commit = True
+    if needs_commit:
+        db.commit()
     return users
 
 
