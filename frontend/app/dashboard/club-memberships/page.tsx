@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Users, UserMinus, UserPlus, X } from "lucide-react";
@@ -185,6 +186,7 @@ type Tab = "roster" | "invites";
 
 export default function ClubMembershipsPage() {
   const { isClubAdmin, isLeagueLevel, isPlayer, user: currentUser } = useCurrentUser();
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>(isPlayer ? "invites" : "roster");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [releaseTarget, setReleaseTarget] = useState<PlayerRead | null>(null);
@@ -227,9 +229,15 @@ export default function ClubMembershipsPage() {
     mutationFn: ({ id, decision }: { id: number; decision: "accept" | "reject" }) =>
       clubMembershipsApi.decide(id, { decision }),
     onSuccess: (_, { decision }) => {
-      toast.success(decision === "accept" ? "You've joined the club!" : "Invite declined");
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       queryClient.invalidateQueries({ queryKey: ["club-memberships"] });
       queryClient.invalidateQueries({ queryKey: ["players"] });
+      if (decision === "accept") {
+        toast.success("You've joined the club!");
+        router.push("/dashboard");
+      } else {
+        toast.success("Invite declined");
+      }
     },
     onError: (err: Error) => toast.error(err.message),
   });
