@@ -38,6 +38,8 @@ class PlayerRead(BaseModel):
     status: PlayerStatus
     created_at: datetime
     updated_at: datetime
+    # Access-controlled; populated by router when caller may view the document.
+    nic_document_url: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -71,3 +73,7 @@ class PlayerUpdate(BaseModel):
     # Set this to the S3 key returned by the photo upload URL endpoint.
     photo_key: str | None = None
     status: PlayerStatus | None = None
+
+
+class NicDocumentUpdate(BaseModel):
+    nic_document_key: str

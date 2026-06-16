@@ -2,9 +2,10 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Building2, Calendar, Mail, Shield, User } from "lucide-react";
+import { ArrowLeft, Building2, Calendar, ExternalLink, FileText, Mail, Shield, User } from "lucide-react";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usersApi, playersApi, clubsApi } from "@/lib/api";
 import { formatDate, formatRelative } from "@/lib/utils";
 import type { ClubRead, PlayerRead, UserRead } from "@/types";
@@ -13,6 +14,7 @@ export default function UserDetailPage() {
   const params = useParams();
   const router = useRouter();
   const userId = Number(params.id);
+  const { user: currentUser, isLeagueLevel, isClubAdmin } = useCurrentUser();
 
   const { data: user, isLoading } = useQuery<UserRead>({
     queryKey: ["user", userId],
@@ -199,6 +201,29 @@ export default function UserDetailPage() {
               <StatusBadge status={player.status} />
             </div>
           </div>
+
+          {/* NIC document — visible to league admins and the player's own club admin */}
+          {(isLeagueLevel || (isClubAdmin && currentUser?.club_id === player.club_id)) && (
+            <div className="mt-3 rounded-lg border border-border bg-card p-4 flex items-start gap-3">
+              <FileText className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">NIC Document</p>
+                {player.nic_document_url ? (
+                  <a
+                    href={player.nic_document_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium mt-0.5 text-primary hover:underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    View PDF
+                  </a>
+                ) : (
+                  <p className="text-sm text-muted-foreground mt-0.5">Not uploaded yet</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

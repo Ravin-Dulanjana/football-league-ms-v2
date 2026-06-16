@@ -25,6 +25,8 @@ class Player(Base):
     # Stores the S3 object key (e.g. "players/photos/uuid.jpg"), not a URL.
     # The CloudFront URL is built at read time by get_file_url() in storage.py.
     photo_key: Mapped[str | None] = mapped_column(String(512))
+    # NIC document PDF; URL is access-controlled at read time.
+    nic_document_key: Mapped[str | None] = mapped_column(String(512))
     # Current club membership — null means the player is free (not in any club).
     # Set when a ClubMembershipRequest is accepted; cleared when released.
     club_id: Mapped[int | None] = mapped_column(

@@ -11,10 +11,13 @@ import {
   CalendarDays,
   Camera,
   CreditCard,
+  ExternalLink,
+  FileText,
   Mail,
   Pencil,
   Phone,
   Shield,
+  Upload,
   User,
 } from "lucide-react";
 
@@ -200,6 +203,90 @@ function PhotoUploadButton({
 }
 
 // ---------------------------------------------------------------------------
+// NIC document upload
+// ---------------------------------------------------------------------------
+
+function NicDocumentSection({
+  playerId,
+  currentNicDocUrl,
+}: {
+  playerId: number;
+  currentNicDocUrl: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      toast.error("Only PDF files are accepted");
+      return;
+    }
+    setUploading(true);
+    try {
+      const { url, fields, key } = await playersApi.myNicUploadUrl(file.name, "application/pdf");
+      const formData = new FormData();
+      Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
+      formData.append("file", file);
+      const s3Res = await fetch(url, { method: "POST", body: formData });
+      if (!s3Res.ok) throw new Error("Upload to S3 failed");
+      await playersApi.saveMyNicDocument({ nic_document_key: key });
+      queryClient.invalidateQueries({ queryKey: ["player", playerId] });
+      toast.success("NIC document uploaded");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <p className="text-xs text-muted-foreground mb-3 flex items-center gap-1.5">
+        <FileText className="h-3 w-3" />
+        NIC Document (PDF)
+      </p>
+      <div className="flex items-center gap-2">
+        {currentNicDocUrl ? (
+          <>
+            <a
+              href={currentNicDocUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" />
+              View document
+            </a>
+            <span className="text-muted-foreground text-xs">·</span>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground flex-1">No document uploaded yet</p>
+        )}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <Upload className="h-3 w-3" />
+          {uploading ? "Uploading…" : currentNicDocUrl ? "Replace" : "Upload PDF"}
+        </button>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main profile page
 // ---------------------------------------------------------------------------
 
@@ -372,6 +459,12 @@ export default function ProfilePage() {
               </p>
               <p className="text-sm font-mono font-medium">{player.league_player_code}</p>
             </div>
+            {user.player_id && (
+              <NicDocumentSection
+                playerId={user.player_id}
+                currentNicDocUrl={player.nic_document_url ?? null}
+              />
+            )}
           </div>
         </div>
       )}
