@@ -120,6 +120,14 @@ function CreateUserDialog({
         <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
 
           <div className="space-y-1.5">
+            <Label htmlFor="u-email">Email *</Label>
+            <Input id="u-email" type="email" {...form.register("email")} />
+            {form.formState.errors.email && (
+              <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
             <Label htmlFor="full_name">Full name *</Label>
             <Input id="full_name" {...form.register("full_name")} placeholder="e.g. Kamal Perera" />
             {form.formState.errors.full_name && (
@@ -531,13 +539,13 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader
-        title={isClubAdmin ? "Members" : "Users"}
-        description={isClubAdmin ? "Everyone in your club" : "All accounts in the system"}
+        title="Members"
+        description={isClubAdmin ? "Everyone in your club" : "All members in the league"}
         action={
           (isLeagueLevel || isClubAdmin) && tab === "active" ? (
             <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
               <Plus className="h-4 w-4" />
-              {isClubAdmin ? "Add member" : "New user"}
+              Add member
             </Button>
           ) : undefined
         }
@@ -619,11 +627,11 @@ export default function UsersPage() {
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
       ) : !users?.length ? (
         <EmptyState
-          title={tab === "deleted" ? "No deleted users" : isClubAdmin ? "No members yet" : "No users"}
+          title={tab === "deleted" ? "No deleted members" : "No members yet"}
           icon={<Users className="h-6 w-6" />}
           action={
             (isLeagueLevel || isClubAdmin) && tab === "active"
-              ? { label: isClubAdmin ? "Add member" : "Create user", onClick: () => setCreateOpen(true) }
+              ? { label: "Add member", onClick: () => setCreateOpen(true) }
               : undefined
           }
         />

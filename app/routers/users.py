@@ -54,14 +54,9 @@ def get_me(
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_any_admin),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> User:
-    """Any admin can fetch any user. Players/club-admins only see their own record."""
-    if (
-        current_user.role not in ("super_admin", "league_admin")
-        and current_user.id != user_id
-    ):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied.")
+    """All authenticated users can view any member's record."""
     user = user_service.get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
@@ -73,11 +68,13 @@ def get_user(
 def list_users(
     include_deleted: bool = Query(False, alias="include_deleted"),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_any_admin),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> list[User]:
     """
-    super_admin sees all users; with ?include_deleted=1 also sees soft-deleted.
-    league_admin sees all non-deleted users.
+    All authenticated members can list members.
+    super_admin with ?include_deleted=1 also sees soft-deleted.
+    club_admin sees only members of their own club.
+    player sees all non-deleted members.
     """
     return user_service.get_all_users(db, current_user, include_deleted)
 

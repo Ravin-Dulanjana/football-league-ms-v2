@@ -18,7 +18,6 @@ import {
   ScrollText,
   Search,
   Shield,
-  Shirt,
   UserCheck,
   UserCircle,
   Users,
@@ -40,7 +39,7 @@ import type { NotificationRead } from "@/types";
 const TABS = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Clubs", href: "/dashboard/clubs", icon: Building2 },
-  { label: "Players", href: "/dashboard/players", icon: Shirt },
+  { label: "Members", href: "/dashboard/users", icon: Users },
   { label: "Alerts", href: "/dashboard/notifications", icon: Bell, isAlerts: true },
   { label: "More", href: "#more", icon: MoreHorizontal, isMore: true },
 ];
@@ -67,7 +66,7 @@ const SHEET_GROUPS: SheetGroup[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: Home },
       { label: "Clubs", href: "/dashboard/clubs", icon: Building2 },
-      { label: "Players", href: "/dashboard/players", icon: Shirt },
+      { label: "Members", href: "/dashboard/users", icon: Users },
       { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
       { label: "My Profile", href: "/dashboard/profile", icon: UserCircle },
     ],
@@ -127,12 +126,6 @@ const SHEET_GROUPS: SheetGroup[] = [
         href: "/dashboard/audit-logs",
         icon: Shield,
         roles: ["super_admin", "league_admin"],
-      },
-      {
-        label: "Users",
-        href: "/dashboard/users",
-        icon: Users,
-        roles: ["super_admin", "league_admin", "club_admin"],
       },
       {
         label: "Reports",

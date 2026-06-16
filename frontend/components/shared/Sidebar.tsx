@@ -16,7 +16,6 @@ import {
   LogOut,
   ScrollText,
   Shield,
-  Shirt,
   UserCheck,
   Users,
   UserCircle,
@@ -47,7 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: Home },
       { label: "Clubs", href: "/dashboard/clubs", icon: Building2 },
-      { label: "Players", href: "/dashboard/players", icon: Shirt },
+      { label: "Members", href: "/dashboard/users", icon: Users },
       { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
       { label: "My Profile", href: "/dashboard/profile", icon: UserCircle },
     ],
@@ -107,12 +106,6 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/dashboard/audit-logs",
         icon: Shield,
         roles: ["super_admin", "league_admin"],
-      },
-      {
-        label: "Users",
-        href: "/dashboard/users",
-        icon: Users,
-        roles: ["super_admin", "league_admin", "club_admin"],
       },
       {
         label: "Reports",
