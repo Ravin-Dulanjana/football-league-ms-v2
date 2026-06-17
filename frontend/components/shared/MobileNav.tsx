@@ -53,6 +53,10 @@ interface SheetItem {
   href: string;
   icon: React.ElementType;
   roles?: string[];
+  /** Only show when the user has no club (and is not super_admin). */
+  noClubOnly?: boolean;
+  /** Only show when the user has a club (or is super_admin). */
+  requiresClub?: boolean;
 }
 
 interface SheetGroup {
@@ -75,22 +79,22 @@ const SHEET_GROUPS: SheetGroup[] = [
     label: "Operations",
     items: [
       {
-        label: "Club Roster",
+        label: "Invites",
         href: "/dashboard/club-memberships",
         icon: UserCheck,
-        roles: ["super_admin", "league_admin", "club_admin", "player"],
+        noClubOnly: true,
       },
       {
         label: "Registrations",
         href: "/dashboard/registrations",
         icon: ClipboardList,
-        roles: ["club_admin", "club_staff", "player"],
+        requiresClub: true,
       },
       {
         label: "Releases",
         href: "/dashboard/releases",
         icon: FileText,
-        roles: ["club_admin", "club_staff", "player"],
+        requiresClub: true,
       },
       {
         label: "Seasons",
@@ -156,8 +160,23 @@ function MoreSheet({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, role } = useCurrentUser();
+  const { user, role, isSuperAdmin } = useCurrentUser();
   const [search, setSearch] = useState("");
+
+  const hasClub = !!user?.club_id;
+  const noClubUser = !hasClub && !isSuperAdmin;
+
+  const itemVisible = (item: SheetItem) => {
+    if (item.roles && role && !item.roles.includes(role)) return false;
+    if (item.noClubOnly && !noClubUser) return false;
+    if (item.requiresClub && !hasClub && !isSuperAdmin) return false;
+    return true;
+  };
+
+  const myClubItem: SheetItem | null =
+    hasClub && user?.club_id
+      ? { label: "My Club", href: `/dashboard/clubs/${user.club_id}`, icon: Building2 }
+      : null;
 
   const handleLogout = async () => {
     onClose();
@@ -167,9 +186,7 @@ function MoreSheet({
     router.refresh();
   };
 
-  const allItems = SHEET_GROUPS.flatMap((g) =>
-    g.items.filter((item) => !item.roles || (role && item.roles.includes(role)))
-  );
+  const allItems = SHEET_GROUPS.flatMap((g) => g.items.filter(itemVisible));
 
   const filtered = search.trim()
     ? allItems.filter((item) =>
@@ -270,9 +287,11 @@ function MoreSheet({
           ) : (
             <div className="space-y-4">
               {SHEET_GROUPS.map((group) => {
-                const visibleItems = group.items.filter(
-                  (item) => !item.roles || (role && item.roles.includes(role))
-                );
+                const baseItems = group.items.filter(itemVisible);
+                const visibleItems =
+                  group.label === "Overview" && myClubItem
+                    ? [...baseItems, myClubItem]
+                    : baseItems;
                 if (visibleItems.length === 0) return null;
 
                 return (

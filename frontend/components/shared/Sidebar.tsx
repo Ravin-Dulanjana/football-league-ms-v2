@@ -43,13 +43,13 @@ interface NavGroup {
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isLoading, role, isPlayer, isClubAdmin, isLeagueLevel } = useCurrentUser();
+  const { user, isLoading, role, isPlayer, isClubAdmin, isLeagueLevel, isSuperAdmin } = useCurrentUser();
 
   const hasClub = !!user?.club_id;
-  // Free player = plain member (no governance role) who hasn't joined a club yet
-  const isFreePlayer = role === "player" && !hasClub;
-  // Registrations and releases are only meaningful once affiliated with a club
-  const canSeeOps = isLeagueLevel || isClubAdmin || (isPlayer && hasClub);
+  // Any non-super-admin without a club sees Invites instead of ops items
+  const noClubUser = !hasClub && !isSuperAdmin;
+  // Registrations and releases require club membership (super_admin always has access)
+  const canSeeOps = isSuperAdmin || hasClub;
 
   const NAV_GROUPS: NavGroup[] = [
     {
@@ -68,7 +68,7 @@ export function Sidebar() {
     {
       label: "Operations",
       items: [
-        ...(isFreePlayer
+        ...(noClubUser
           ? [{ label: "Invites", href: "/dashboard/club-memberships", icon: UserCheck }]
           : []),
         ...(canSeeOps
