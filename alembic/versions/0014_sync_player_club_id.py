@@ -21,6 +21,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Fix player-role users whose user.club_id was never set or drifted from
+    # the linked Player record.
     op.execute(
         """
         UPDATE users
@@ -30,6 +32,23 @@ def upgrade() -> None:
           AND users.role = 'player'
           AND players.club_id IS NOT NULL
           AND (users.club_id IS DISTINCT FROM players.club_id)
+        """
+    )
+    # Fix governance-role users (club_admin OR league_admin+club_admin) whose
+    # user.club_id is NULL but have a club_admin entry in user_governance_roles.
+    # Affects league_admin users who also hold a club_admin role — their
+    # user.role is "league_admin" (highest_role wins) so the club_admin-only
+    # heal in attach_governance_roles never fired for them.
+    op.execute(
+        """
+        UPDATE users
+        SET club_id = ugr.club_id
+        FROM user_governance_roles ugr
+        WHERE users.id = ugr.user_id
+          AND ugr.role = 'club_admin'
+          AND ugr.club_id IS NOT NULL
+          AND users.club_id IS NULL
+          AND users.role IN ('club_admin', 'league_admin')
         """
     )
 
