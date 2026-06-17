@@ -485,7 +485,10 @@ function ReleasesTable({
 // ---------------------------------------------------------------------------
 
 export default function ReleasesPage() {
-  const { user, isClubAdmin, isPlayer } = useCurrentUser();
+  const { user } = useCurrentUser();
+  // Only pure club_admin role manages the club's outgoing releases.
+  // League admins (even with club_admin governance) see only their own player releases.
+  const isPureClubAdmin = user?.role === "club_admin";
 
   const { data: releases = [], isLoading, error, refetch } = useQuery<ReleaseRead[]>({
     queryKey: ["releases"],
@@ -503,7 +506,7 @@ export default function ReleasesPage() {
       <PageHeader
         title="Releases"
         description={
-          isClubAdmin
+          isPureClubAdmin
             ? "Release players from your club. Squad must be submitted first."
             : "Release notices from your club"
         }
@@ -513,13 +516,13 @@ export default function ReleasesPage() {
         <DataTableSkeleton columns={6} />
       ) : error ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
-      ) : isClubAdmin && user?.club_id ? (
+      ) : isPureClubAdmin && user?.club_id ? (
         <ClubAdminView
           clubId={user.club_id}
           releases={releases}
           playerMap={playerMap}
         />
-      ) : isPlayer && user?.player_id ? (
+      ) : user?.player_id ? (
         <PlayerView
           playerId={user.player_id}
           releases={releases}
@@ -527,8 +530,8 @@ export default function ReleasesPage() {
         />
       ) : (
         <EmptyState
-          title="No access"
-          description="This page is for club admins and players"
+          title="No release notices"
+          description="Release notices from your club will appear here"
           icon={<FileText className="h-6 w-6" />}
         />
       )}

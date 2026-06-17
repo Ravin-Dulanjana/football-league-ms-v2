@@ -40,17 +40,18 @@ def get_all_requests(
 ) -> list[ClubMembershipRequest]:
     """
     Return club membership requests scoped by caller:
-      club_admin — their own club's invites
-      player     — invites for their own player_id
-      league+    — all
+      club_admin       — their own club's outgoing invites
+      everyone else    — only invites addressed to their own player_id
     """
     q = select(ClubMembershipRequest).order_by(ClubMembershipRequest.id.desc())
     if current_user.role == "club_admin":
         if not current_user.club_id:
             return []
         q = q.where(ClubMembershipRequest.club_id == current_user.club_id)
-    elif current_user.role == "player" and current_user.player_id:
+    elif current_user.player_id:
         q = q.where(ClubMembershipRequest.player_id == current_user.player_id)
+    else:
+        return []
     return list(db.execute(q).scalars().all())
 
 
