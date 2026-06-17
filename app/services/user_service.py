@@ -85,7 +85,10 @@ def attach_governance_roles(db: Session, users: list[User]) -> list[User]:
     for user in users:
         roles = gmap.get(user.id, [])
         user.governance_roles = roles  # type: ignore[attr-defined]
-        if user.role == "club_admin" and user.club_id is None:
+        # Heal missing club_id for any governance-role user who has a club_admin
+        # entry — covers both pure club_admin and league_admin+club_admin users
+        # (whose user.role is "league_admin" because highest_role wins).
+        if user.club_id is None and user.role in ("club_admin", "league_admin"):
             gov_club_id = next(
                 (r.club_id for r in roles if r.role == "club_admin" and r.club_id),
                 None,
