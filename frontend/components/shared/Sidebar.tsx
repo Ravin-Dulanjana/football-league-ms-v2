@@ -43,7 +43,7 @@ interface NavGroup {
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isLoading, role, isPlayer, isClubAdmin, isLeagueLevel, isSuperAdmin } = useCurrentUser();
+  const { user, isLoading, role, isClubAdmin, isLeagueLevel, isSuperAdmin } = useCurrentUser();
 
   const hasClub = !!user?.club_id;
   // Any non-super-admin without a club sees Invites instead of ops items
