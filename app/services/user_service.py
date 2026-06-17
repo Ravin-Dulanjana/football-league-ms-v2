@@ -108,7 +108,6 @@ def attach_player_names(db: Session, users: list[User]) -> list[User]:
     )
     name_map = {p.id: p.full_name for p in players}
     club_map = {p.id: p.club_id for p in players}
-    needs_commit = False
     for user in users:
         if user.player_id and user.player_id in name_map:
             user.full_name = name_map[user.player_id]  # type: ignore[attr-defined]
@@ -118,9 +117,6 @@ def attach_player_names(db: Session, users: list[User]) -> list[User]:
             player_club_id = club_map.get(user.player_id)
             if player_club_id != user.club_id:
                 user.club_id = player_club_id
-                needs_commit = True
-    if needs_commit:
-        db.commit()
     return users
 
 
