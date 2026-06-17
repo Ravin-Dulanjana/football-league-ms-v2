@@ -55,7 +55,7 @@ from app.services.season_service import is_registration_window_open
 logger = get_logger(__name__)
 
 MAX_STAFF_PER_CLUB_SEASON = 10
-MIN_PLAYERS_PER_CLUB_SEASON = 17
+MIN_PLAYERS_PER_CLUB_SEASON = 2  # testing: lower to 2 (prod: 17)
 
 # ---------------------------------------------------------------------------
 # ClubSeasonProfile
