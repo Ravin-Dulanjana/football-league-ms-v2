@@ -8,14 +8,20 @@ from sqlalchemy.orm import Session
 from app.dependencies import CurrentUser
 from app.middleware.logging import get_logger
 from app.middleware.request_id import request_id_var
-from app.models.registration import (
-    PlayerSeasonRegistration,
-    PlayerSeasonRegistrationStatus,
+from app.models.player import Player
+from app.models.release import (
+    PlayerDocument,
+    PlayerRelease,
+    ReleaseDocument,
+    ReleaseStatus,
 )
-from app.models.release import PlayerRelease, ReleaseDocument, ReleaseStatus
-from app.schemas.release import ReleaseCreate
+from app.models.season import Season
+from app.models.user import User
+from app.models.user_governance_role import UserGovernanceRole
+from app.schemas.release import PlayerDocumentCreate, ReleaseCreate
 from app.services import audit_service
 from app.services.events import publish_event
+from app.services.user_service import highest_role
 
 logger = get_logger(__name__)
 
@@ -27,14 +33,14 @@ def get_all_releases(
     """
     Return releases scoped by caller role:
       club_admin  — only releases from their club (from_club_id)
-      player      — only releases for their own player_id
-      all others  — everything
+      everyone else with a player_id — only their own releases
+      super admin / no player — everything
     """
     q = select(PlayerRelease).order_by(PlayerRelease.id.desc())
     if current_user is not None:
         if current_user.role == "club_admin" and current_user.club_id:
             q = q.where(PlayerRelease.from_club_id == current_user.club_id)
-        elif current_user.role == "player" and current_user.player_id:
+        elif current_user.player_id:
             q = q.where(PlayerRelease.player_id == current_user.player_id)
     return list(db.execute(q).scalars().all())
 
@@ -49,62 +55,50 @@ def create_release(
     current_user: CurrentUser,
 ) -> tuple[PlayerRelease | None, str | None]:
     """
+    Club admin releases a player from their club, with a required PDF document.
+
     Guards:
-      - registration must be ACTIVE
-      - no existing release for this registration
-    Atomically creates PlayerRelease + ReleaseDocument.
+      - caller must have a club (club_id is not None)
+      - player must exist and be in the caller's club
+      - no active season (roster is locked while a season is in progress)
+
+    On success:
+      - PlayerRelease (status=CONFIRMED) + ReleaseDocument are created atomically
+      - player.club_id and linked user.club_id are cleared immediately
     """
     logger.info(
         {
             "event": "create_release.start",
-            "registration_id": data.registration_id,
+            "player_id": data.player_id,
             "request_id": request_id_var.get(),
         }
     )
-    registration = db.get(PlayerSeasonRegistration, data.registration_id)
-    if registration is None:
-        return None, "Registration not found."
-    if registration.status != PlayerSeasonRegistrationStatus.ACTIVE:
-        return None, "Only active registrations can be released."
 
-    # Guard: squad list must have been submitted before a release is possible
-    from app.models.club_season import (  # noqa: PLC0415
-        ClubSeasonProfile,
-        ClubSeasonProfileStatus,
+    if not current_user.club_id:
+        return None, "You must be a club admin to release a player."
+
+    player = db.get(Player, data.player_id)
+    if player is None:
+        return None, "Player not found."
+    if player.club_id != current_user.club_id:
+        return None, "You can only release players from your own club."
+
+    seasons = list(
+        db.execute(select(Season).where(Season.is_archived.is_(False))).scalars().all()
     )
-
-    profile = db.execute(
-        select(ClubSeasonProfile).where(
-            ClubSeasonProfile.club_id == registration.club_id,
-            ClubSeasonProfile.season_id == registration.season_id,
-        )
-    ).scalar_one_or_none()
-    submitted_statuses = {
-        ClubSeasonProfileStatus.SUBMITTED,
-        ClubSeasonProfileStatus.RESUBMITTED,
-        ClubSeasonProfileStatus.REVIEWED,
-        ClubSeasonProfileStatus.APPROVED,
-    }
-    if profile is None or profile.status not in submitted_statuses:
-        return (
-            None,
-            "The club's squad list must be submitted to the league"
-            " before releasing a player.",
+    if any(s.is_locked for s in seasons):
+        return None, (
+            "Cannot release a player while a season is active. "
+            "Releases are only allowed outside of the playing season."
         )
 
-    existing = db.execute(
-        select(PlayerRelease).where(
-            PlayerRelease.registration_id == data.registration_id
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        return None, "A release already exists for this registration."
+    now = datetime.now(tz=UTC)
 
     release = PlayerRelease(
-        registration_id=registration.id,
-        player_id=registration.player_id,
-        from_club_id=registration.club_id,
-        status=ReleaseStatus.PENDING_PLAYER_CONFIRMATION,
+        player_id=player.id,
+        from_club_id=current_user.club_id,
+        status=ReleaseStatus.CONFIRMED,
+        confirmed_at=now,
         effective_date=data.effective_date,
     )
     db.add(release)
@@ -116,6 +110,43 @@ def create_release(
         file_name=data.file_name,
     )
     db.add(document)
+
+    # Clear club membership immediately
+    released_from_club_id = current_user.club_id
+    player.club_id = None
+    linked_user = db.execute(
+        select(User).where(User.player_id == player.id)
+    ).scalar_one_or_none()
+    if linked_user is not None:
+        linked_user.club_id = None
+        # If the released player is also a club_admin of this club, revoke that role.
+        gov_entry = db.execute(
+            select(UserGovernanceRole).where(
+                UserGovernanceRole.user_id == linked_user.id,
+                UserGovernanceRole.role == "club_admin",
+                UserGovernanceRole.club_id == released_from_club_id,
+            )
+        ).scalar_one_or_none()
+        if gov_entry is not None:
+            db.delete(gov_entry)
+            db.flush()
+            remaining = list(
+                db.execute(
+                    select(UserGovernanceRole).where(
+                        UserGovernanceRole.user_id == linked_user.id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if remaining:
+                linked_user.role = highest_role([r.role for r in remaining])
+                ca = next((r for r in remaining if r.role == "club_admin"), None)
+                linked_user.club_id = ca.club_id if ca else None
+            else:
+                linked_user.role = linked_user.member_type or "player"
+                linked_user.club_id = None
+
     db.flush()
     audit_service.write_audit_log(
         db,
@@ -126,10 +157,9 @@ def create_release(
         details={
             "player_id": release.player_id,
             "from_club_id": release.from_club_id,
-            "registration_id": data.registration_id,
         },
     )
-    db.commit()  # single commit — release + document + audit land together
+    db.commit()
     db.refresh(release)
     logger.info(
         {
@@ -140,11 +170,8 @@ def create_release(
         }
     )
 
-    # Notify club admin that a release has been initiated.
-    # release.player and release.from_club lazy-load via the still-open session.
-    # Note: Player has no email address in this schema — see self-audit for details.
     publish_event(
-        "release.initiated",
+        "release.confirmed",
         {
             "release_id": release.id,
             "player_name": release.player.full_name,
@@ -163,11 +190,8 @@ def decide_release(
     current_user: CurrentUser,
 ) -> tuple[PlayerRelease | None, str | None]:
     """
-    Guards:
-      - current_user must be the player named in the release
-      - release must still be PENDING_PLAYER_CONFIRMATION
-    On confirm: atomically marks release CONFIRMED + registration RELEASED.
-    On reject: marks release REJECTED only.
+    Legacy endpoint: kept for old PENDING_PLAYER_CONFIRMATION records.
+    New releases are created with status=CONFIRMED directly.
     """
     logger.info(
         {
@@ -184,13 +208,20 @@ def decide_release(
         return None, "This release has already been processed."
 
     now = datetime.now(tz=UTC)
-
-    # confirm — update both release and registration atomically
     release.status = ReleaseStatus.CONFIRMED
     release.confirmed_at = now
-    registration = db.get(PlayerSeasonRegistration, release.registration_id)
-    registration.status = PlayerSeasonRegistrationStatus.RELEASED  # type: ignore[union-attr]
-    registration.released_at = now  # type: ignore[union-attr]
+
+    if release.registration_id is not None:
+        from app.models.registration import (  # noqa: PLC0415
+            PlayerSeasonRegistration,
+            PlayerSeasonRegistrationStatus,
+        )
+
+        registration = db.get(PlayerSeasonRegistration, release.registration_id)
+        if registration is not None:
+            registration.status = PlayerSeasonRegistrationStatus.RELEASED
+            registration.released_at = now
+
     db.flush()
     audit_service.write_audit_log(
         db,
@@ -199,7 +230,7 @@ def decide_release(
         entity_type="PlayerRelease",
         entity_id=release.id,
     )
-    db.commit()  # single commit — both changes land together or neither does
+    db.commit()
     db.refresh(release)
     logger.info(
         {
@@ -219,3 +250,47 @@ def decide_release(
         },
     )
     return release, None
+
+
+# ---------------------------------------------------------------------------
+# Player self-uploaded documents
+# ---------------------------------------------------------------------------
+
+
+def get_player_documents(db: Session, player_id: int) -> list[PlayerDocument]:
+    return list(
+        db.execute(
+            select(PlayerDocument)
+            .where(PlayerDocument.player_id == player_id)
+            .order_by(PlayerDocument.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def create_player_document(
+    db: Session,
+    player_id: int,
+    data: PlayerDocumentCreate,
+    current_user: CurrentUser,
+) -> PlayerDocument:
+    doc = PlayerDocument(
+        player_id=player_id,
+        s3_key=data.s3_key,
+        file_name=data.file_name,
+        description=data.description,
+    )
+    db.add(doc)
+    db.flush()
+    audit_service.write_audit_log(
+        db,
+        actor_id=current_user.id,
+        action="player_document.create",
+        entity_type="PlayerDocument",
+        entity_id=doc.id,
+        details={"player_id": player_id, "file_name": data.file_name},
+    )
+    db.commit()
+    db.refresh(doc)
+    return doc

@@ -433,8 +433,11 @@ function RegistrationsTable({
 // ---------------------------------------------------------------------------
 
 export default function RegistrationsPage() {
-  const { user, isClubAdmin, isPlayer } = useCurrentUser();
+  const { user } = useCurrentUser();
   const { playerMap, seasonMap } = useNameMaps();
+  // Only pure club_admin manages outgoing requests.
+  // League admins (even with club_admin governance) see their own incoming requests.
+  const isPureClubAdmin = user?.role === "club_admin";
 
   const { data: requests = [], isLoading, error, refetch } = useQuery<RegistrationRequestRead[]>({
     queryKey: ["registrations"],
@@ -446,7 +449,7 @@ export default function RegistrationsPage() {
       <PageHeader
         title="Registrations"
         description={
-          isClubAdmin
+          isPureClubAdmin
             ? "Registration requests sent to players on behalf of your club"
             : "Registration requests from clubs"
         }
@@ -456,14 +459,14 @@ export default function RegistrationsPage() {
         <DataTableSkeleton columns={5} />
       ) : error ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
-      ) : isClubAdmin && user?.club_id ? (
+      ) : isPureClubAdmin && user?.club_id ? (
         <ClubAdminView
           clubId={user.club_id}
           requests={requests}
           playerMap={playerMap}
           seasonMap={seasonMap}
         />
-      ) : isPlayer && user?.player_id ? (
+      ) : user?.player_id ? (
         <PlayerView
           playerId={user.player_id}
           requests={requests}
@@ -472,8 +475,8 @@ export default function RegistrationsPage() {
         />
       ) : (
         <EmptyState
-          title="No access"
-          description="This page is for club admins and players"
+          title="No registration requests"
+          description="Your club will send you a registration request for each season"
           icon={<ClipboardList className="h-6 w-6" />}
         />
       )}

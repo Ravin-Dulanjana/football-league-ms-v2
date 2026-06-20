@@ -364,7 +364,7 @@ export interface ReleaseDocumentRead {
 
 export interface ReleaseRead {
   id: number;
-  registration_id: number;
+  registration_id: number | null;
   player_id: number;
   from_club_id: number;
   status: ReleaseStatus;
@@ -375,10 +375,20 @@ export interface ReleaseRead {
 }
 
 export interface ReleaseCreate {
-  registration_id: number;
+  player_id: number;
   s3_key: string;
   file_name: string;
   effective_date?: string;
+}
+
+export interface PlayerDocumentRead {
+  id: number;
+  player_id: number;
+  s3_key: string;
+  file_name: string;
+  file_url: string;
+  description: string | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

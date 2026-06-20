@@ -39,6 +39,7 @@ import type {
   NotificationPreferenceUpdate,
   NotificationRead,
   PlayerCreate,
+  PlayerDocumentRead,
   PlayerRead,
   PlayerSeasonRegistrationRead,
   PlayerUpdate,
@@ -221,6 +222,18 @@ export const playersApi = {
   saveMyNicDocument: (data: NicDocumentUpdate) =>
     apiFetch<PlayerRead>("/players/me/nic-document/", {
       method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  getDocuments: (playerId: number) =>
+    apiFetch<PlayerDocumentRead[]>(`/players/${playerId}/documents/`),
+  myDocumentUploadUrl: (filename: string, contentType = "application/pdf") =>
+    apiFetch<UploadUrlResponse>(
+      `/players/me/document-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
+      { method: "POST" }
+    ),
+  saveMyDocument: (data: { s3_key: string; file_name: string; description?: string }) =>
+    apiFetch<PlayerDocumentRead>("/players/me/documents/", {
+      method: "POST",
       body: JSON.stringify(data),
     }),
 };

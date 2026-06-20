@@ -9,7 +9,8 @@ from app.dependencies import CurrentUser, get_current_user, require_role
 from app.models.player import Player
 from app.schemas.club import UploadUrlResponse
 from app.schemas.player import NicDocumentUpdate, PlayerCreate, PlayerRead, PlayerUpdate
-from app.services import player_service, storage
+from app.schemas.release import PlayerDocumentCreate, PlayerDocumentRead
+from app.services import player_service, release_service, storage
 
 router = APIRouter(prefix="/players", tags=["players"])
 
@@ -202,3 +203,71 @@ def save_my_nic_document(
     result = PlayerRead.model_validate(player)
     result.nic_document_url = storage.get_file_url(player.nic_document_key)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Player documents — self-uploaded external release/transfer docs
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{player_id}/documents/",
+    response_model=list[PlayerDocumentRead],
+    summary="List external documents uploaded by or for a player",
+)
+def list_player_documents(
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list:
+    is_self = current_user.player_id == player_id
+    is_admin = current_user.role in ("club_admin", "league_admin", "super_admin")
+    if not is_self and not is_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You can only view documents for players in your club or your own profile.",
+        )
+    return release_service.get_player_documents(db, player_id)
+
+
+@router.post(
+    "/me/document-upload-url/",
+    response_model=UploadUrlResponse,
+    summary="Get a pre-signed URL to upload a personal release/transfer document",
+)
+def get_my_document_upload_url(
+    filename: str,
+    content_type: str = "application/pdf",
+    _: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """
+    Returns a pre-signed POST URL for uploading a personal document (e.g. an
+    external release letter from another league). Upload the file to S3 first,
+    then call POST /players/me/documents/ with the returned key.
+    """
+    return storage.generate_upload_url(
+        folder="player-docs",
+        filename=filename,
+        content_type=content_type,
+    )
+
+
+@router.post(
+    "/me/documents/",
+    response_model=PlayerDocumentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Save a personal document record after uploading to S3",
+)
+def save_my_document(
+    data: PlayerDocumentCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> object:
+    if not current_user.player_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No player profile linked to your account.",
+        )
+    return release_service.create_player_document(
+        db, current_user.player_id, data, current_user
+    )

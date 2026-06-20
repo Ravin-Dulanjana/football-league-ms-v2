@@ -2,11 +2,15 @@
 
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
-import { CheckCheck, ExternalLink, FileText, Paperclip, Plus } from "lucide-react";
+import {
+  AlertCircle,
+  ExternalLink,
+  FileText,
+  Lock,
+  Upload,
+  UserMinus,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,13 +23,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -34,7 +31,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ConfirmDialog,
   DataTableSkeleton,
   EmptyState,
   ErrorState,
@@ -42,440 +38,364 @@ import {
 } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { releasesApi, registrationsApi, playersApi } from "@/lib/api";
+import { releasesApi, playersApi, seasonsApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import type {
-  PlayerRead,
-  PlayerSeasonRegistrationRead,
-  ReleaseRead,
-} from "@/types";
+import type { PlayerRead, ReleaseRead, SeasonRead, UploadUrlResponse } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Create release dialog — club admin only
+// S3 helper
 // ---------------------------------------------------------------------------
 
-const createSchema = z.object({
-  registration_id: z.number().int().positive("Select a player"),
-  effective_date: z.string().optional(),
-});
-type CreateForm = z.infer<typeof createSchema>;
+async function uploadToS3(uploadUrl: UploadUrlResponse, file: File): Promise<void> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(uploadUrl.fields)) {
+    form.append(k, v as string);
+  }
+  form.append("file", file);
+  const res = await fetch(uploadUrl.url, { method: "POST", body: form });
+  if (!res.ok) throw new Error("Document upload failed — please try again");
+}
 
-function CreateReleaseDialog({
-  clubId,
-  open,
-  onOpenChange,
+// ---------------------------------------------------------------------------
+// Release dialog — two-step: (1) upload PDF, (2) confirm
+// ---------------------------------------------------------------------------
+
+function ReleaseDialog({
+  player,
+  onClose,
 }: {
-  clubId: number;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  player: PlayerRead;
+  onClose: () => void;
 }) {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [step, setStep] = useState<"form" | "confirm">("form");
+  const [file, setFile] = useState<File | null>(null);
+  const [effectiveDate, setEffectiveDate] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [fileError, setFileError] = useState(false);
 
-  const { data: activeRegs = [] } = useQuery<PlayerSeasonRegistrationRead[]>({
-    queryKey: ["player-season-registrations", clubId],
-    queryFn: () => registrationsApi.listPlayerSeasonRegistrations({ club_id: clubId }),
-    enabled: open,
-  });
-
-  const { data: players = [] } = useQuery<PlayerRead[]>({
-    queryKey: ["players"],
-    queryFn: playersApi.list,
-    enabled: open,
-  });
-  const playerMap = new Map(players.map((p) => [p.id, p]));
-
-  const form = useForm<CreateForm>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { registration_id: 0, effective_date: "" },
-  });
-
-  const mutation = useMutation({
-    mutationFn: async (data: CreateForm) => {
-      if (!selectedFile) throw new Error("Please attach a release document (PDF)");
-
+  const releaseMutation = useMutation({
+    mutationFn: async () => {
+      if (!file) throw new Error("A release document PDF is required.");
       setUploading(true);
-      try {
-        // Step 1: get pre-signed URL
-        const { url, fields, key } = await releasesApi.documentUploadUrl(
-          selectedFile.name,
-          selectedFile.type || "application/pdf"
-        );
+      const uploadUrl = await releasesApi.documentUploadUrl(
+        file.name,
+        file.type || "application/pdf"
+      );
+      await uploadToS3(uploadUrl, file);
+      setUploading(false);
 
-        // Step 2: upload directly to S3
-        const formData = new FormData();
-        for (const [k, v] of Object.entries(fields)) {
-          formData.append(k, v);
-        }
-        formData.append("file", selectedFile);
-        const s3Res = await fetch(url, { method: "POST", body: formData });
-        if (!s3Res.ok) throw new Error("Document upload failed — please try again");
-
-        // Step 3: create the release with the s3_key
-        return releasesApi.create({
-          registration_id: data.registration_id,
-          s3_key: key,
-          file_name: selectedFile.name,
-          effective_date: data.effective_date || undefined,
-        });
-      } finally {
-        setUploading(false);
-      }
+      return releasesApi.create({
+        player_id: player.id,
+        s3_key: uploadUrl.key,
+        file_name: file.name,
+        effective_date: effectiveDate || undefined,
+      });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["players"] });
       queryClient.invalidateQueries({ queryKey: ["releases"] });
-      toast.success("Release initiated — player has been notified");
-      onOpenChange(false);
-      form.reset();
-      setSelectedFile(null);
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      toast.success(`${player.full_name} released — they are now a free agent`);
+      onClose();
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => {
+      setUploading(false);
+      setStep("form");
+      toast.error(err.message);
+    },
   });
 
-  const isWorking = mutation.isPending || uploading;
+  const isWorking = releaseMutation.isPending;
+
+  const handleNext = () => {
+    if (!file) {
+      setFileError(true);
+      return;
+    }
+    setFileError(false);
+    setStep("confirm");
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open onOpenChange={(v) => { if (!v && !isWorking) onClose(); }}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Release player</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground -mt-2">
-          The player will be notified and must acknowledge the release.
-          You can only release players from a submitted squad.
-        </p>
-        <form
-          onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
-          className="space-y-4"
-        >
-          <div className="space-y-1.5">
-            <Label>Player *</Label>
-            <Controller
-              control={form.control}
-              name="registration_id"
-              render={({ field }) => (
-                <Select
-                  onValueChange={(v) => field.onChange(Number(v))}
-                  value={field.value ? String(field.value) : ""}
+        {step === "form" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Release {player.full_name}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground -mt-2">
+              Attach the official release letter. The player will be removed from
+              your club and can view this document from their profile.
+            </p>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Release document (PDF) *</Label>
+                <div
+                  className="flex items-center gap-2 rounded-md border border-border px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => fileRef.current?.click()}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select player" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeRegs.map((reg) => {
-                      const player = playerMap.get(reg.player_id);
-                      return (
-                        <SelectItem key={reg.id} value={String(reg.id)}>
-                          {player?.full_name ?? `Player ${reg.player_id}`}
-                          {player && (
-                            <span className="ml-1.5 text-muted-foreground font-mono text-xs">
-                              {player.league_player_code}
-                            </span>
-                          )}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-            {form.formState.errors.registration_id && (
-              <p className="text-xs text-destructive">
-                {form.formState.errors.registration_id.message}
-              </p>
-            )}
-            {activeRegs.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No active players found for your club.
-              </p>
-            )}
-          </div>
+                  <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm text-muted-foreground truncate">
+                    {file ? file.name : "Click to choose a PDF file…"}
+                  </span>
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] ?? null);
+                    setFileError(false);
+                  }}
+                />
+                {fileError && (
+                  <p className="text-xs text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" /> A release document is required
+                  </p>
+                )}
+              </div>
 
-          <div className="space-y-1.5">
-            <Label>Release document (PDF) *</Label>
-            <div
-              className="flex items-center gap-2 p-3 rounded-lg border border-dashed border-border cursor-pointer hover:bg-muted/40 transition-colors"
-              onClick={() => fileRef.current?.click()}
-            >
-              <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="text-sm text-muted-foreground truncate">
-                {selectedFile ? selectedFile.name : "Click to attach PDF"}
-              </span>
+              <div className="space-y-1.5">
+                <Label htmlFor="eff-date">Effective date (optional)</Label>
+                <Input
+                  id="eff-date"
+                  type="date"
+                  value={effectiveDate}
+                  onChange={(e) => setEffectiveDate(e.target.value)}
+                />
+              </div>
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="eff-date">Effective date</Label>
-            <Input id="eff-date" type="date" {...form.register("effective_date")} />
-          </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button onClick={handleNext}>
+                Continue
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>Are you sure?</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                You are about to release{" "}
+                <span className="font-semibold text-foreground">{player.full_name}</span>{" "}
+                from your club. This will:
+              </p>
+              <ul className="text-sm space-y-1 pl-4">
+                <li className="text-muted-foreground">
+                  • Remove them from your club immediately
+                </li>
+                <li className="text-muted-foreground">
+                  • Attach the release letter: <span className="font-mono text-xs">{file?.name}</span>
+                </li>
+                <li className="text-muted-foreground">
+                  • If they were a club admin, that role will be revoked
+                </li>
+              </ul>
+              <p className="text-sm font-medium text-destructive">
+                This cannot be undone.
+              </p>
+            </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isWorking}>
-              {isWorking ? (uploading ? "Uploading…" : "Creating…") : "Release player"}
-            </Button>
-          </DialogFooter>
-        </form>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setStep("form")}
+                disabled={isWorking}
+              >
+                Back
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={isWorking}
+                onClick={() => releaseMutation.mutate()}
+              >
+                {uploading
+                  ? "Uploading document…"
+                  : isWorking
+                  ? "Releasing…"
+                  : "Confirm release"}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Club admin view — sent releases
+// Club admin view — list club members, release with PDF
 // ---------------------------------------------------------------------------
 
-function ClubAdminView({
-  clubId,
-  releases,
-  playerMap,
-}: {
-  clubId: number;
-  releases: ReleaseRead[];
-  playerMap: Map<number, PlayerRead>;
-}) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const mine = releases.filter((r) => r.from_club_id === clubId);
-  const pending = mine.filter((r) => r.status === "pending_player_confirmation");
-  const history = mine.filter((r) => r.status !== "pending_player_confirmation");
+function ClubAdminView({ clubId }: { clubId: number }) {
+  const [releaseTarget, setReleaseTarget] = useState<PlayerRead | null>(null);
+
+  const { data: players = [], isLoading: playersLoading } = useQuery<PlayerRead[]>({
+    queryKey: ["players"],
+    queryFn: playersApi.list,
+  });
+
+  const { data: seasons = [] } = useQuery<SeasonRead[]>({
+    queryKey: ["seasons"],
+    queryFn: seasonsApi.list,
+  });
+
+  const seasonLocked = seasons.some((s) => s.status === "active");
+  const clubPlayers = players.filter((p) => p.club_id === clubId);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Release player
-        </Button>
-      </div>
-
-      {mine.length === 0 ? (
-        <EmptyState
-          title="No releases sent"
-          description="Submit your squad list first, then you can release players"
-          icon={<FileText className="h-6 w-6" />}
-          action={{ label: "Release player", onClick: () => setCreateOpen(true) }}
-        />
-      ) : (
-        <>
-          {pending.length > 0 && (
-            <ReleasesTable
-              title={`Awaiting acknowledgement (${pending.length})`}
-              rows={pending}
-              playerMap={playerMap}
-            />
-          )}
-          {history.length > 0 && (
-            <ReleasesTable title="History" rows={history} playerMap={playerMap} />
-          )}
-        </>
+    <div className="space-y-4">
+      {seasonLocked && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4">
+          <Lock className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+              Season is active — releases are locked
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              Players cannot be released while a season is in progress.
+            </p>
+          </div>
+        </div>
       )}
 
-      <CreateReleaseDialog clubId={clubId} open={createOpen} onOpenChange={setCreateOpen} />
+      {playersLoading ? (
+        <DataTableSkeleton columns={3} />
+      ) : clubPlayers.length === 0 ? (
+        <EmptyState
+          title="No players in club"
+          description="Invite players to join your club first"
+          icon={<UserMinus className="h-6 w-6" />}
+        />
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Code</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {clubPlayers.map((player) => (
+                <TableRow key={player.id}>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {player.league_player_code}
+                  </TableCell>
+                  <TableCell className="font-medium">{player.full_name}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={player.status} />
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
+                      disabled={seasonLocked}
+                      onClick={() => setReleaseTarget(player)}
+                    >
+                      <UserMinus className="h-3.5 w-3.5" />
+                      Release
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {releaseTarget && (
+        <ReleaseDialog
+          player={releaseTarget}
+          onClose={() => setReleaseTarget(null)}
+        />
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Player view — incoming releases with Acknowledge button
+// Player view — own release records from clubs
 // ---------------------------------------------------------------------------
 
 function PlayerView({
   playerId,
   releases,
-  playerMap,
 }: {
   playerId: number;
   releases: ReleaseRead[];
-  playerMap: Map<number, PlayerRead>;
 }) {
-  const [ackTarget, setAckTarget] = useState<number | null>(null);
-  const queryClient = useQueryClient();
-
-  const ackMutation = useMutation({
-    mutationFn: (id: number) => releasesApi.decide(id, "confirm"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["releases"] });
-      toast.success("Release acknowledged");
-      setAckTarget(null);
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
   const mine = releases.filter((r) => r.player_id === playerId);
-  const pending = mine.filter((r) => r.status === "pending_player_confirmation");
-  const history = mine.filter((r) => r.status !== "pending_player_confirmation");
 
   if (mine.length === 0) {
     return (
       <EmptyState
-        title="No release notices"
-        description="Release notices from your club will appear here"
+        title="No release records"
+        description="Release records from your clubs will appear here"
         icon={<FileText className="h-6 w-6" />}
       />
     );
   }
 
   return (
-    <div className="space-y-6">
-      {pending.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
-            Awaiting your acknowledgement ({pending.length})
-          </h2>
-          <div className="space-y-3">
-            {pending.map((r) => (
-              <div
-                key={r.id}
-                className="flex items-start justify-between p-4 rounded-lg border border-border bg-card gap-4"
-              >
-                <div className="space-y-1 min-w-0">
-                  <p className="text-sm font-medium">
-                    Release from Club {r.from_club_id}
-                  </p>
-                  {r.effective_date && (
-                    <p className="text-xs text-muted-foreground">
-                      Effective: {formatDate(r.effective_date)}
-                    </p>
+    <div className="rounded-lg border border-border overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Club</TableHead>
+            <TableHead>Effective date</TableHead>
+            <TableHead>Documents</TableHead>
+            <TableHead>Date</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {mine.map((r) => (
+            <TableRow key={r.id}>
+              <TableCell className="font-medium">Club {r.from_club_id}</TableCell>
+              <TableCell className="text-sm">
+                {r.effective_date ? formatDate(r.effective_date) : "—"}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-col gap-1">
+                  {r.documents.map((doc) => (
+                    <a
+                      key={doc.id}
+                      href={doc.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <FileText className="h-3 w-3" />
+                      {doc.file_name}
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                  ))}
+                  {r.documents.length === 0 && (
+                    <span className="text-xs text-muted-foreground">—</span>
                   )}
-                  {r.documents.length > 0 && (
-                    <div className="flex flex-col gap-1 mt-1">
-                      {r.documents.map((doc) => (
-                        <a
-                          key={doc.id}
-                          href={doc.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-primary hover:underline"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <FileText className="h-3 w-3" />
-                          {doc.file_name}
-                          <ExternalLink className="h-2.5 w-2.5" />
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Received {formatDate(r.created_at)}
-                  </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 shrink-0"
-                  onClick={() => setAckTarget(r.id)}
-                >
-                  <CheckCheck className="h-3.5 w-3.5" />
-                  Acknowledge
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {history.length > 0 && (
-        <ReleasesTable title="History" rows={history} playerMap={playerMap} />
-      )}
-
-      {ackTarget !== null && (
-        <ConfirmDialog
-          open
-          onOpenChange={(v) => { if (!v) setAckTarget(null); }}
-          title="Acknowledge release?"
-          description="By acknowledging, you confirm you have been released from the club. This cannot be undone."
-          confirmLabel="Acknowledge release"
-          destructive
-          loading={ackMutation.isPending}
-          onConfirm={() => ackMutation.mutate(ackTarget!)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Shared table
-// ---------------------------------------------------------------------------
-
-function ReleasesTable({
-  title,
-  rows,
-  playerMap,
-}: {
-  title: string;
-  rows: ReleaseRead[];
-  playerMap: Map<number, PlayerRead>;
-}) {
-  return (
-    <div>
-      <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
-        {title}
-      </h2>
-      <div className="rounded-lg border border-border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Player</TableHead>
-              <TableHead>Club</TableHead>
-              <TableHead>Effective date</TableHead>
-              <TableHead>Document</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Date</TableHead>
+              </TableCell>
+              <TableCell className="text-sm text-muted-foreground">
+                {r.confirmed_at ? formatDate(r.confirmed_at) : formatDate(r.created_at)}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => {
-              const player = playerMap.get(r.player_id);
-              return (
-                <TableRow key={r.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium">
-                    {player?.full_name ?? `Player ${r.player_id}`}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    Club {r.from_club_id}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {r.effective_date ? formatDate(r.effective_date) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    {r.documents.length > 0 ? (
-                      <a
-                        href={r.documents[0].file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        <FileText className="h-3 w-3" />
-                        {r.documents[0].file_name}
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={r.status} />
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {r.confirmed_at ? formatDate(r.confirmed_at) : formatDate(r.created_at)}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -486,20 +406,13 @@ function ReleasesTable({
 
 export default function ReleasesPage() {
   const { user } = useCurrentUser();
-  // Only pure club_admin role manages the club's outgoing releases.
-  // League admins (even with club_admin governance) see only their own player releases.
   const isPureClubAdmin = user?.role === "club_admin";
 
   const { data: releases = [], isLoading, error, refetch } = useQuery<ReleaseRead[]>({
     queryKey: ["releases"],
     queryFn: releasesApi.list,
+    enabled: !isPureClubAdmin,
   });
-
-  const { data: players = [] } = useQuery<PlayerRead[]>({
-    queryKey: ["players"],
-    queryFn: playersApi.list,
-  });
-  const playerMap = new Map(players.map((p) => [p.id, p]));
 
   return (
     <div>
@@ -507,31 +420,23 @@ export default function ReleasesPage() {
         title="Releases"
         description={
           isPureClubAdmin
-            ? "Release players from your club. Squad must be submitted first."
-            : "Release notices from your club"
+            ? "Release players from your club — a PDF release letter is required"
+            : "Release records from your clubs"
         }
       />
 
-      {isLoading ? (
-        <DataTableSkeleton columns={6} />
+      {isPureClubAdmin && user?.club_id ? (
+        <ClubAdminView clubId={user.club_id} />
+      ) : isLoading ? (
+        <DataTableSkeleton columns={4} />
       ) : error ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
-      ) : isPureClubAdmin && user?.club_id ? (
-        <ClubAdminView
-          clubId={user.club_id}
-          releases={releases}
-          playerMap={playerMap}
-        />
       ) : user?.player_id ? (
-        <PlayerView
-          playerId={user.player_id}
-          releases={releases}
-          playerMap={playerMap}
-        />
+        <PlayerView playerId={user.player_id} releases={releases} />
       ) : (
         <EmptyState
-          title="No release notices"
-          description="Release notices from your club will appear here"
+          title="No release records"
+          description="Release records from your clubs will appear here"
           icon={<FileText className="h-6 w-6" />}
         />
       )}
