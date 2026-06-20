@@ -29,25 +29,18 @@ def list_releases(
 def get_document_upload_url(
     filename: str,
     content_type: str = "application/pdf",
+    _: CurrentUser = Depends(get_current_user),
 ) -> dict[str, object]:
     """
     Returns a pre-signed POST URL and form fields for uploading a release document.
-
-    This endpoint does NOT require an existing release ID — the document
-    is uploaded first, and the resulting S3 key is submitted alongside
-    the release creation payload.
 
     Upload flow:
     1. Call this endpoint to get the URL, fields, and key.
     2. POST the file directly to S3 (never through the API).
     3. On HTTP 204 from S3, call POST /releases/ with:
-           {"registration_id": <id>, "s3_key": "<key>", "file_name": "<name>"}
+           {"player_id": <id>, "s3_key": "<key>", "file_name": "<name>"}
 
     The URL expires in 900 seconds (15 minutes). Max file size: 10 MB.
-
-    ⚠️  Security note: the API trusts that the key refers to a file that
-    was actually uploaded.  A production-grade system would issue a HEAD
-    request to S3 to verify the object exists before accepting the key.
     """
     return storage.generate_upload_url(
         folder="releases/documents",
@@ -60,15 +53,17 @@ def get_document_upload_url(
 def create_release(
     data: ReleaseCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_role("club_admin")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> PlayerRelease:
-    from app.models.registration import PlayerSeasonRegistration  # noqa: PLC0415
-
-    reg = db.get(PlayerSeasonRegistration, data.registration_id)
-    if reg is not None and reg.club_id != current_user.club_id:
+    """
+    Release a player from your club with a required PDF document.
+    The player is immediately removed from the club (club_id cleared).
+    Caller must have club_id set (club_admin or league_admin with club governance).
+    """
+    if not current_user.club_id:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "You can only release players registered to your own club.",
+            "You must be a club admin to release a player.",
         )
     release, error = release_service.create_release(db, data, current_user)
     if error:

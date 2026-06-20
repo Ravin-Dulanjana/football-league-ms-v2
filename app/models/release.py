@@ -24,9 +24,10 @@ class PlayerRelease(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # OneToOne: one release attempt per registration
-    registration_id: Mapped[int] = mapped_column(
-        ForeignKey("player_season_registrations.id", ondelete="CASCADE"), unique=True
+    # Optional: only set for releases that were tied to a season registration.
+    # New-style direct releases (club removes player mid-membership) leave this null.
+    registration_id: Mapped[int | None] = mapped_column(
+        ForeignKey("player_season_registrations.id", ondelete="SET NULL"),
     )
     # denormalised for query convenience (avoid joining through registration)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
@@ -39,7 +40,7 @@ class PlayerRelease(Base):
             name="releasestatus",
             values_callable=lambda x: [e.value for e in x],
         ),
-        default=ReleaseStatus.PENDING_PLAYER_CONFIRMATION,
+        default=ReleaseStatus.CONFIRMED,
     )
     effective_date: Mapped[date | None] = mapped_column(Date)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -47,7 +48,7 @@ class PlayerRelease(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    registration: Mapped[PlayerSeasonRegistration] = relationship(
+    registration: Mapped[PlayerSeasonRegistration | None] = relationship(
         "PlayerSeasonRegistration", back_populates="release"
     )
     player: Mapped[Player] = relationship("Player")
@@ -65,9 +66,7 @@ class ReleaseDocument(Base):
         ForeignKey("player_releases.id", ondelete="CASCADE")
     )
     # S3 object key for this document (e.g. "releases/documents/uuid.pdf").
-    # The CloudFront URL is built at read time by get_file_url() in storage.py.
     s3_key: Mapped[str] = mapped_column(String(512))
-    # Original filename for display (e.g. "release-letter.pdf").
     file_name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -76,6 +75,23 @@ class ReleaseDocument(Base):
     release: Mapped[PlayerRelease] = relationship(
         "PlayerRelease", back_populates="documents"
     )
+
+
+class PlayerDocument(Base):
+    """Player-uploaded external release documents (e.g. from other leagues/clubs)."""
+
+    __tablename__ = "player_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
+    s3_key: Mapped[str] = mapped_column(String(512))
+    file_name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    player: Mapped[Player] = relationship("Player")
 
 
 # avoid circular imports at module level
