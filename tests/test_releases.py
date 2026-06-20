@@ -2,11 +2,12 @@
 Tests for the release flow.
 
 Happy paths and all guards:
-  - registration must be ACTIVE to initiate a release
-  - duplicate release must be rejected
-  - only the named player can decide
+  - player must be in the caller's club to initiate a release
+  - player not in any club is rejected
+  - player in a different club is rejected
+  - only the named player can decide (legacy PENDING records)
   - release cannot be decided twice
-  - on confirm: registration is atomically marked RELEASED
+  - on decide confirm: registration is atomically marked RELEASED
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser, get_current_user
 from app.models.club import Club, ClubStatus
-from app.models.club_season import ClubSeasonProfile, ClubSeasonProfileStatus
 from app.models.player import Player
 from app.models.registration import (
     PlayerSeasonRegistration,
@@ -48,12 +48,22 @@ def club(db: Session) -> Club:
 
 
 @pytest.fixture()
-def player(db: Session) -> Player:
+def other_club(db: Session) -> Club:
+    c = Club(name="Colombo FC", code="CFC", status=ClubStatus.ACTIVE)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@pytest.fixture()
+def player(db: Session, club: Club) -> Player:
     p = Player(
         league_player_code="WL-0001",
         full_name="Kamal Perera",
         date_of_birth=datetime(1995, 6, 15).date(),
         nic_number="199516500123",
+        club_id=club.id,
     )
     db.add(p)
     db.commit()
@@ -98,20 +108,6 @@ def _as_player(player: Player) -> None:
     )
 
 
-@pytest.fixture()
-def submitted_profile(db: Session, club: Club, season: Season) -> ClubSeasonProfile:
-    """ClubSeasonProfile in SUBMITTED state; required before creating a release."""
-    profile = ClubSeasonProfile(
-        club_id=club.id,
-        season_id=season.id,
-        status=ClubSeasonProfileStatus.SUBMITTED,
-    )
-    db.add(profile)
-    db.commit()
-    db.refresh(profile)
-    return profile
-
-
 def _as_club_admin(club: Club) -> None:
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         id=999, role="club_admin", club_id=club.id
@@ -127,81 +123,85 @@ _RELEASE_PAYLOAD = {
 
 
 # ---------------------------------------------------------------------------
-# Tests — create release
+# Tests — create release (new direct flow: player_id, immediate CONFIRMED)
 # ---------------------------------------------------------------------------
 
 
 def test_create_release_success(
     client: TestClient,
     db: Session,
-    active_registration: PlayerSeasonRegistration,
-    submitted_profile: ClubSeasonProfile,
+    player: Player,
     club: Club,
 ) -> None:
+    """Club admin releases a player who is in their club — immediate CONFIRMED."""
     _as_club_admin(club)
-    payload = {**_RELEASE_PAYLOAD, "registration_id": active_registration.id}
+    payload = {**_RELEASE_PAYLOAD, "player_id": player.id}
     response = client.post("/releases/", json=payload)
     assert response.status_code == 201
     body = response.json()
-    assert body["registration_id"] == active_registration.id
-    assert body["status"] == "pending_player_confirmation"
+    assert body["player_id"] == player.id
+    assert body["from_club_id"] == club.id
+    assert body["status"] == "confirmed"
+    assert body["registration_id"] is None
     assert len(body["documents"]) == 1
     assert body["documents"][0]["file_name"] == "release-letter.pdf"
-    # s3_key is the raw key stored in the DB
     assert body["documents"][0]["s3_key"] == "releases/documents/test-uuid.pdf"
 
+    # Player club_id must be cleared immediately
+    db.expire_all()
+    db.refresh(player)
+    assert player.club_id is None
 
-def test_create_release_registration_not_active(
+
+def test_create_release_player_not_in_club(
     client: TestClient,
     db: Session,
     club: Club,
-    player: Player,
-    season: Season,
 ) -> None:
-    released_reg = PlayerSeasonRegistration(
-        season_id=season.id,
-        club_id=club.id,
-        player_id=player.id,
-        registration_type=RegistrationType.NEW,
-        status=PlayerSeasonRegistrationStatus.RELEASED,
+    """Releasing a player who is not in any club returns 400."""
+    free_player = Player(
+        league_player_code="WL-FREE",
+        full_name="Free Agent",
+        date_of_birth=datetime(1998, 1, 1).date(),
+        nic_number="199800100001",
+        club_id=None,
     )
-    db.add(released_reg)
+    db.add(free_player)
     db.commit()
 
     _as_club_admin(club)
-    payload = {**_RELEASE_PAYLOAD, "registration_id": released_reg.id}
+    payload = {**_RELEASE_PAYLOAD, "player_id": free_player.id}
     response = client.post("/releases/", json=payload)
     assert response.status_code == 400
-    assert "active" in response.json()["detail"].lower()
+    assert "own club" in response.json()["detail"].lower()
 
 
-def test_create_release_duplicate_rejected(
+def test_create_release_player_in_different_club(
     client: TestClient,
     db: Session,
-    active_registration: PlayerSeasonRegistration,
-    submitted_profile: ClubSeasonProfile,
-    player: Player,
     club: Club,
+    other_club: Club,
 ) -> None:
-    # Seed an existing pending release
-    existing_release = PlayerRelease(
-        registration_id=active_registration.id,
-        player_id=player.id,
-        from_club_id=club.id,
-        status=ReleaseStatus.PENDING_PLAYER_CONFIRMATION,
+    """Club admin cannot release a player from a different club."""
+    other_player = Player(
+        league_player_code="WL-OTHER",
+        full_name="Other Club Player",
+        date_of_birth=datetime(1997, 5, 5).date(),
+        nic_number="199705050001",
+        club_id=other_club.id,
     )
-    db.add(existing_release)
+    db.add(other_player)
     db.commit()
 
     _as_club_admin(club)
-    payload = {**_RELEASE_PAYLOAD, "registration_id": active_registration.id}
+    payload = {**_RELEASE_PAYLOAD, "player_id": other_player.id}
     response = client.post("/releases/", json=payload)
     assert response.status_code == 400
-    assert "already exists" in response.json()["detail"].lower()
+    assert "own club" in response.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------
-# Tests — decide release
+# Tests — decide release (legacy PENDING_PLAYER_CONFIRMATION records)
 # ---------------------------------------------------------------------------
 
 
