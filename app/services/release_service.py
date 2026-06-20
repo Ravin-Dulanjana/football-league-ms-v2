@@ -17,9 +17,11 @@ from app.models.release import (
 )
 from app.models.season import Season
 from app.models.user import User
+from app.models.user_governance_role import UserGovernanceRole
 from app.schemas.release import PlayerDocumentCreate, ReleaseCreate
 from app.services import audit_service
 from app.services.events import publish_event
+from app.services.user_service import highest_role
 
 logger = get_logger(__name__)
 
@@ -110,12 +112,40 @@ def create_release(
     db.add(document)
 
     # Clear club membership immediately
+    released_from_club_id = current_user.club_id
     player.club_id = None
     linked_user = db.execute(
         select(User).where(User.player_id == player.id)
     ).scalar_one_or_none()
     if linked_user is not None:
         linked_user.club_id = None
+        # If the released player is also a club_admin of this club, revoke that role.
+        gov_entry = db.execute(
+            select(UserGovernanceRole).where(
+                UserGovernanceRole.user_id == linked_user.id,
+                UserGovernanceRole.role == "club_admin",
+                UserGovernanceRole.club_id == released_from_club_id,
+            )
+        ).scalar_one_or_none()
+        if gov_entry is not None:
+            db.delete(gov_entry)
+            db.flush()
+            remaining = list(
+                db.execute(
+                    select(UserGovernanceRole).where(
+                        UserGovernanceRole.user_id == linked_user.id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if remaining:
+                linked_user.role = highest_role([r.role for r in remaining])
+                ca = next((r for r in remaining if r.role == "club_admin"), None)
+                linked_user.club_id = ca.club_id if ca else None
+            else:
+                linked_user.role = linked_user.member_type or "player"
+                linked_user.club_id = None
 
     db.flush()
     audit_service.write_audit_log(

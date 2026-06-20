@@ -57,7 +57,7 @@ async function uploadToS3(uploadUrl: UploadUrlResponse, file: File): Promise<voi
 }
 
 // ---------------------------------------------------------------------------
-// Release dialog — PDF required
+// Release dialog — two-step: (1) upload PDF, (2) confirm
 // ---------------------------------------------------------------------------
 
 function ReleaseDialog({
@@ -69,6 +69,7 @@ function ReleaseDialog({
 }) {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState<"form" | "confirm">("form");
   const [file, setFile] = useState<File | null>(null);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -76,11 +77,7 @@ function ReleaseDialog({
 
   const releaseMutation = useMutation({
     mutationFn: async () => {
-      if (!file) {
-        setFileError(true);
-        throw new Error("A release document PDF is required.");
-      }
-      setFileError(false);
+      if (!file) throw new Error("A release document PDF is required.");
       setUploading(true);
       const uploadUrl = await releasesApi.documentUploadUrl(
         file.name,
@@ -105,83 +102,133 @@ function ReleaseDialog({
     },
     onError: (err: Error) => {
       setUploading(false);
+      setStep("form");
       toast.error(err.message);
     },
   });
 
   const isWorking = releaseMutation.isPending;
 
+  const handleNext = () => {
+    if (!file) {
+      setFileError(true);
+      return;
+    }
+    setFileError(false);
+    setStep("confirm");
+  };
+
   return (
     <Dialog open onOpenChange={(v) => { if (!v && !isWorking) onClose(); }}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Release {player.full_name}?</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground -mt-2">
-          The player will be removed from your club immediately. A PDF release
-          letter is required — they can view and download it from their profile.
-        </p>
+        {step === "form" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Release {player.full_name}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground -mt-2">
+              Attach the official release letter. The player will be removed from
+              your club and can view this document from their profile.
+            </p>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>Release document (PDF) *</Label>
-            <div
-              className="flex items-center gap-2 rounded-md border border-border px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
-              onClick={() => fileRef.current?.click()}
-            >
-              <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="text-sm text-muted-foreground truncate">
-                {file ? file.name : "Click to choose a PDF file…"}
-              </span>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Release document (PDF) *</Label>
+                <div
+                  className="flex items-center gap-2 rounded-md border border-border px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm text-muted-foreground truncate">
+                    {file ? file.name : "Click to choose a PDF file…"}
+                  </span>
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] ?? null);
+                    setFileError(false);
+                  }}
+                />
+                {fileError && (
+                  <p className="text-xs text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" /> A release document is required
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="eff-date">Effective date (optional)</Label>
+                <Input
+                  id="eff-date"
+                  type="date"
+                  value={effectiveDate}
+                  onChange={(e) => setEffectiveDate(e.target.value)}
+                />
+              </div>
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                setFile(e.target.files?.[0] ?? null);
-                setFileError(false);
-              }}
-            />
-            {fileError && (
-              <p className="text-xs text-destructive flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> A release document is required
+
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button onClick={handleNext}>
+                Continue
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>Are you sure?</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                You are about to release{" "}
+                <span className="font-semibold text-foreground">{player.full_name}</span>{" "}
+                from your club. This will:
               </p>
-            )}
-          </div>
+              <ul className="text-sm space-y-1 pl-4">
+                <li className="text-muted-foreground">
+                  • Remove them from your club immediately
+                </li>
+                <li className="text-muted-foreground">
+                  • Attach the release letter: <span className="font-mono text-xs">{file?.name}</span>
+                </li>
+                <li className="text-muted-foreground">
+                  • If they were a club admin, that role will be revoked
+                </li>
+              </ul>
+              <p className="text-sm font-medium text-destructive">
+                This cannot be undone.
+              </p>
+            </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="eff-date">Effective date (optional)</Label>
-            <Input
-              id="eff-date"
-              type="date"
-              value={effectiveDate}
-              onChange={(e) => setEffectiveDate(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={onClose}
-            disabled={isWorking}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={isWorking}
-            onClick={() => releaseMutation.mutate()}
-          >
-            {uploading
-              ? "Uploading document…"
-              : isWorking
-              ? "Releasing…"
-              : "Release player"}
-          </Button>
-        </DialogFooter>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setStep("form")}
+                disabled={isWorking}
+              >
+                Back
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={isWorking}
+                onClick={() => releaseMutation.mutate()}
+              >
+                {uploading
+                  ? "Uploading document…"
+                  : isWorking
+                  ? "Releasing…"
+                  : "Confirm release"}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

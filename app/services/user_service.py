@@ -215,6 +215,9 @@ def create_user(
         except Exception:
             return None, "A player with that NIC number already exists."
         player_id = new_player.id
+        # Club admins who have a player profile are members of their own club.
+        if club_id is not None:
+            new_player.club_id = club_id
 
     # Create in Cognito
     cognito_sub = _cognito_create_user(
@@ -516,6 +519,12 @@ def assign_role(
         target.club_id = club_admin_entry.club_id
     elif new_club_id is not None:
         target.club_id = new_club_id
+
+    # Sync player.club_id so the player appears in the club's player list.
+    if new_role == "club_admin" and new_club_id and target.player_id:
+        linked_player = db.get(Player, target.player_id)
+        if linked_player is not None and linked_player.club_id is None:
+            linked_player.club_id = new_club_id
 
     _cognito_update_role(target.cognito_sub, top_role, target.club_id)
 

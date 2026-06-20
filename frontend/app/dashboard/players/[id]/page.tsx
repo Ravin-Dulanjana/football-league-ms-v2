@@ -177,6 +177,12 @@ export default function PlayerDetailPage() {
 
   const { user } = useCurrentUser();
   const isOwnProfile = user?.player_id === playerId;
+  // Release docs are only visible to the player themselves, club admins, or league admins.
+  const canSeeDocs =
+    isOwnProfile ||
+    user?.role === "club_admin" ||
+    user?.role === "league_admin" ||
+    user?.role === "super_admin";
 
   const { data: player, isLoading } = useQuery<PlayerRead>({
     queryKey: ["player", playerId],
@@ -192,7 +198,7 @@ export default function PlayerDetailPage() {
   const { data: allReleases = [] } = useQuery<ReleaseRead[]>({
     queryKey: ["releases"],
     queryFn: releasesApi.list,
-    enabled: !!player,
+    enabled: !!player && canSeeDocs,
   });
   const playerReleases = allReleases.filter(
     (r) => r.player_id === playerId && r.status === "confirmed"
@@ -201,7 +207,7 @@ export default function PlayerDetailPage() {
   const { data: playerDocuments = [] } = useQuery<PlayerDocumentRead[]>({
     queryKey: ["player-documents", playerId],
     queryFn: () => playersApi.getDocuments(playerId),
-    enabled: !!player,
+    enabled: !!player && canSeeDocs,
   });
 
   const { data: allClubs = [] } = useQuery<ClubRead[]>({
@@ -340,8 +346,8 @@ export default function PlayerDetailPage() {
         )}
       </div>
 
-      {/* Release documents & external docs */}
-      {(hasAnyDocs || isOwnProfile) && (
+      {/* Release documents & external docs — only visible to the player, club admins, and league admins */}
+      {canSeeDocs && (hasAnyDocs || isOwnProfile) && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">

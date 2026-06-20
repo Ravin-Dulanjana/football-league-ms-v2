@@ -218,8 +218,15 @@ def save_my_nic_document(
 def list_player_documents(
     player_id: int,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> list:
+    is_self = current_user.player_id == player_id
+    is_admin = current_user.role in ("club_admin", "league_admin", "super_admin")
+    if not is_self and not is_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You can only view documents for players in your club or your own profile.",
+        )
     return release_service.get_player_documents(db, player_id)
 
 
