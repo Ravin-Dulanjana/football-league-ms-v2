@@ -948,55 +948,25 @@ def test_release_create_writes_audit_log(db: Session) -> None:
 
     from app.models.audit_log import AuditLog  # noqa: PLC0415
     from app.models.player import Player  # noqa: PLC0415
-    from app.models.registration import (  # noqa: PLC0415
-        PlayerSeasonRegistration,
-        PlayerSeasonRegistrationStatus,
-        RegistrationType,
-    )
 
-    season = _open_season(db)
     club = _club(db, "Release Audit Club", "RAUC")
     player = Player(
         league_player_code="P-RELEASE-001",
         full_name="Release Audit Player",
         date_of_birth=date(1996, 3, 20),
         nic_number="NIC-RELEASE-001",
+        club_id=club.id,
     )
     db.add(player)
     db.commit()
     db.refresh(player)
-
-    reg = PlayerSeasonRegistration(
-        season_id=season.id,
-        club_id=club.id,
-        player_id=player.id,
-        registration_type=RegistrationType.NEW,
-        status=PlayerSeasonRegistrationStatus.ACTIVE,
-    )
-    db.add(reg)
-    db.commit()
-    db.refresh(reg)
-
-    # Squad must be submitted before a release can be created
-    from app.models.club_season import (  # noqa: PLC0415
-        ClubSeasonProfile,
-        ClubSeasonProfileStatus,
-    )
-
-    profile = ClubSeasonProfile(
-        club_id=club.id,
-        season_id=season.id,
-        status=ClubSeasonProfileStatus.SUBMITTED,
-    )
-    db.add(profile)
-    db.commit()
 
     club_admin = CurrentUser(id=5, role="club_admin", club_id=club.id)
     with make_client(db, club_admin) as c:
         response = c.post(
             "/releases/",
             json={
-                "registration_id": reg.id,
+                "player_id": player.id,
                 "s3_key": "releases/documents/test-release.pdf",
                 "file_name": "test-release.pdf",
                 "effective_date": "2030-06-01",

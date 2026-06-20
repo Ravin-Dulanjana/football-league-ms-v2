@@ -20,7 +20,7 @@ PATCHING STRATEGY:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -30,19 +30,10 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser, get_current_user
 from app.models.club import Club, ClubStatus
-from app.models.club_season import ClubSeasonProfile, ClubSeasonProfileStatus
 from app.models.player import Player
-from app.models.registration import (
-    PlayerSeasonRegistration,
-    PlayerSeasonRegistrationStatus,
-    RegistrationType,
-)
 from app.models.release import ReleaseDocument
-from app.models.season import Season
 from app.services import storage
 from main import app
-
-NOW = datetime.now(tz=UTC)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -387,12 +378,13 @@ def _club(db: Session) -> Club:
 
 
 @pytest.fixture()
-def _player(db: Session) -> Player:
+def _player(db: Session, _club: Club) -> Player:
     p = Player(
         league_player_code="WL-0001",
         full_name="Kamal Perera",
         date_of_birth=datetime(1995, 6, 15).date(),
         nic_number="199516500123",
+        club_id=_club.id,
     )
     db.add(p)
     db.commit()
@@ -400,36 +392,11 @@ def _player(db: Session) -> Player:
     return p
 
 
-@pytest.fixture()
-def _active_registration(
-    db: Session, _club: Club, _player: Player
-) -> PlayerSeasonRegistration:
-    season = Season(
-        name="2025 Season",
-        year=2025,
-        registration_open_at=NOW - timedelta(days=1),
-        registration_close_at=NOW + timedelta(days=30),
-    )
-    db.add(season)
-    db.flush()
-
-    reg = PlayerSeasonRegistration(
-        season_id=season.id,
-        club_id=_club.id,
-        player_id=_player.id,
-        registration_type=RegistrationType.NEW,
-        status=PlayerSeasonRegistrationStatus.ACTIVE,
-    )
-    db.add(reg)
-    db.commit()
-    db.refresh(reg)
-    return reg
-
-
 def test_create_release_stores_s3_key_not_url(
     client: TestClient,
     db: Session,
-    _active_registration: PlayerSeasonRegistration,
+    _player: Player,
+    _club: Club,
 ) -> None:
     """
     POST /releases/ should store the S3 object key in the database —
@@ -438,22 +405,13 @@ def test_create_release_stores_s3_key_not_url(
     The document in the response includes the computed CloudFront URL
     (file_url) AND the raw S3 key (s3_key).
     """
-    # Squad must be submitted before a release can be created
-    profile = ClubSeasonProfile(
-        club_id=_active_registration.club_id,
-        season_id=_active_registration.season_id,
-        status=ClubSeasonProfileStatus.SUBMITTED,
-    )
-    db.add(profile)
-    db.commit()
-
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        id=999, role="club_admin", club_id=_active_registration.club_id
+        id=999, role="club_admin", club_id=_club.id
     )
 
     s3_key = "releases/documents/a1b2c3d4-test.pdf"
     payload = {
-        "registration_id": _active_registration.id,
+        "player_id": _player.id,
         "s3_key": s3_key,
         "file_name": "release-letter.pdf",
     }
