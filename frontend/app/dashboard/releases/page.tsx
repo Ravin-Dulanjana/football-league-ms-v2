@@ -1,30 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
-import { CheckCheck, ExternalLink, FileText, Paperclip, Plus } from "lucide-react";
+import { AlertTriangle, CheckCheck, ExternalLink, FileText, Lock, UserMinus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -42,252 +23,126 @@ import {
 } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { releasesApi, registrationsApi, playersApi } from "@/lib/api";
+import { clubMembershipsApi, releasesApi, playersApi, seasonsApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import type {
-  PlayerRead,
-  PlayerSeasonRegistrationRead,
-  ReleaseRead,
-} from "@/types";
+import type { PlayerRead, ReleaseRead, SeasonRead } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Create release dialog — club admin only
+// Club admin view — release any club member (no registration required)
 // ---------------------------------------------------------------------------
 
-const createSchema = z.object({
-  registration_id: z.number().int().positive("Select a player"),
-  effective_date: z.string().optional(),
-});
-type CreateForm = z.infer<typeof createSchema>;
-
-function CreateReleaseDialog({
-  clubId,
-  open,
-  onOpenChange,
-}: {
-  clubId: number;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
+function ClubAdminView({ clubId }: { clubId: number }) {
+  const [releaseTarget, setReleaseTarget] = useState<PlayerRead | null>(null);
   const queryClient = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
 
-  const { data: activeRegs = [] } = useQuery<PlayerSeasonRegistrationRead[]>({
-    queryKey: ["player-season-registrations", clubId],
-    queryFn: () => registrationsApi.listPlayerSeasonRegistrations({ club_id: clubId }),
-    enabled: open,
-  });
-
-  const { data: players = [] } = useQuery<PlayerRead[]>({
+  const { data: players = [], isLoading: playersLoading } = useQuery<PlayerRead[]>({
     queryKey: ["players"],
     queryFn: playersApi.list,
-    enabled: open,
-  });
-  const playerMap = new Map(players.map((p) => [p.id, p]));
-
-  const form = useForm<CreateForm>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { registration_id: 0, effective_date: "" },
   });
 
-  const mutation = useMutation({
-    mutationFn: async (data: CreateForm) => {
-      if (!selectedFile) throw new Error("Please attach a release document (PDF)");
+  const { data: seasons = [] } = useQuery<SeasonRead[]>({
+    queryKey: ["seasons"],
+    queryFn: seasonsApi.list,
+  });
 
-      setUploading(true);
-      try {
-        // Step 1: get pre-signed URL
-        const { url, fields, key } = await releasesApi.documentUploadUrl(
-          selectedFile.name,
-          selectedFile.type || "application/pdf"
-        );
+  const seasonLocked = seasons.some((s) => s.status === "active");
 
-        // Step 2: upload directly to S3
-        const formData = new FormData();
-        for (const [k, v] of Object.entries(fields)) {
-          formData.append(k, v);
-        }
-        formData.append("file", selectedFile);
-        const s3Res = await fetch(url, { method: "POST", body: formData });
-        if (!s3Res.ok) throw new Error("Document upload failed — please try again");
-
-        // Step 3: create the release with the s3_key
-        return releasesApi.create({
-          registration_id: data.registration_id,
-          s3_key: key,
-          file_name: selectedFile.name,
-          effective_date: data.effective_date || undefined,
-        });
-      } finally {
-        setUploading(false);
-      }
-    },
+  const releaseMutation = useMutation({
+    mutationFn: (playerId: number) => clubMembershipsApi.releasePlayer(playerId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["releases"] });
-      toast.success("Release initiated — player has been notified");
-      onOpenChange(false);
-      form.reset();
-      setSelectedFile(null);
+      queryClient.invalidateQueries({ queryKey: ["players"] });
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      toast.success("Player released — they are now a free agent");
+      setReleaseTarget(null);
     },
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const isWorking = mutation.isPending || uploading;
+  const clubPlayers = players.filter((p) => p.club_id === clubId);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Release player</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground -mt-2">
-          The player will be notified and must acknowledge the release.
-          You can only release players from a submitted squad.
-        </p>
-        <form
-          onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
-          className="space-y-4"
-        >
-          <div className="space-y-1.5">
-            <Label>Player *</Label>
-            <Controller
-              control={form.control}
-              name="registration_id"
-              render={({ field }) => (
-                <Select
-                  onValueChange={(v) => field.onChange(Number(v))}
-                  value={field.value ? String(field.value) : ""}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select player" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeRegs.map((reg) => {
-                      const player = playerMap.get(reg.player_id);
-                      return (
-                        <SelectItem key={reg.id} value={String(reg.id)}>
-                          {player?.full_name ?? `Player ${reg.player_id}`}
-                          {player && (
-                            <span className="ml-1.5 text-muted-foreground font-mono text-xs">
-                              {player.league_player_code}
-                            </span>
-                          )}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-            {form.formState.errors.registration_id && (
-              <p className="text-xs text-destructive">
-                {form.formState.errors.registration_id.message}
-              </p>
-            )}
-            {activeRegs.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No active players found for your club.
-              </p>
-            )}
+    <div className="space-y-4">
+      {seasonLocked && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4">
+          <Lock className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+              Season is active — releases are locked
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              Players cannot be released while a season is in progress.
+              Releases are only allowed outside of the playing season.
+            </p>
           </div>
-
-          <div className="space-y-1.5">
-            <Label>Release document (PDF) *</Label>
-            <div
-              className="flex items-center gap-2 p-3 rounded-lg border border-dashed border-border cursor-pointer hover:bg-muted/40 transition-colors"
-              onClick={() => fileRef.current?.click()}
-            >
-              <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="text-sm text-muted-foreground truncate">
-                {selectedFile ? selectedFile.name : "Click to attach PDF"}
-              </span>
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="eff-date">Effective date</Label>
-            <Input id="eff-date" type="date" {...form.register("effective_date")} />
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isWorking}>
-              {isWorking ? (uploading ? "Uploading…" : "Creating…") : "Release player"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Club admin view — sent releases
-// ---------------------------------------------------------------------------
-
-function ClubAdminView({
-  clubId,
-  releases,
-  playerMap,
-}: {
-  clubId: number;
-  releases: ReleaseRead[];
-  playerMap: Map<number, PlayerRead>;
-}) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const mine = releases.filter((r) => r.from_club_id === clubId);
-  const pending = mine.filter((r) => r.status === "pending_player_confirmation");
-  const history = mine.filter((r) => r.status !== "pending_player_confirmation");
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Release player
-        </Button>
-      </div>
-
-      {mine.length === 0 ? (
-        <EmptyState
-          title="No releases sent"
-          description="Submit your squad list first, then you can release players"
-          icon={<FileText className="h-6 w-6" />}
-          action={{ label: "Release player", onClick: () => setCreateOpen(true) }}
-        />
-      ) : (
-        <>
-          {pending.length > 0 && (
-            <ReleasesTable
-              title={`Awaiting acknowledgement (${pending.length})`}
-              rows={pending}
-              playerMap={playerMap}
-            />
-          )}
-          {history.length > 0 && (
-            <ReleasesTable title="History" rows={history} playerMap={playerMap} />
-          )}
-        </>
+        </div>
       )}
 
-      <CreateReleaseDialog clubId={clubId} open={createOpen} onOpenChange={setCreateOpen} />
+      {playersLoading ? (
+        <DataTableSkeleton columns={3} />
+      ) : clubPlayers.length === 0 ? (
+        <EmptyState
+          title="No players in club"
+          description="Invite players to join your club first"
+          icon={<UserMinus className="h-6 w-6" />}
+        />
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Code</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {clubPlayers.map((player) => (
+                <TableRow key={player.id}>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {player.league_player_code}
+                  </TableCell>
+                  <TableCell className="font-medium">{player.full_name}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={player.status} />
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
+                      disabled={seasonLocked}
+                      onClick={() => setReleaseTarget(player)}
+                    >
+                      <UserMinus className="h-3.5 w-3.5" />
+                      Release
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {releaseTarget && (
+        <ConfirmDialog
+          open
+          onOpenChange={(v) => { if (!v) setReleaseTarget(null); }}
+          title="Release player?"
+          description={`Release ${releaseTarget.full_name} from your club? They will become a free agent and can be invited by any club.`}
+          confirmLabel="Release player"
+          destructive
+          loading={releaseMutation.isPending}
+          onConfirm={() => releaseMutation.mutate(releaseTarget.id)}
+        />
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Player view — incoming releases with Acknowledge button
+// Player view — incoming release notices with Acknowledge button
 // ---------------------------------------------------------------------------
 
 function PlayerView({
@@ -386,7 +241,39 @@ function PlayerView({
       )}
 
       {history.length > 0 && (
-        <ReleasesTable title="History" rows={history} playerMap={playerMap} />
+        <div>
+          <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
+            History
+          </h2>
+          <div className="rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Club</TableHead>
+                  <TableHead>Effective date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Date</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {history.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">Club {r.from_club_id}</TableCell>
+                    <TableCell className="text-sm">
+                      {r.effective_date ? formatDate(r.effective_date) : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={r.status} />
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {r.confirmed_at ? formatDate(r.confirmed_at) : formatDate(r.created_at)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
       )}
 
       {ackTarget !== null && (
@@ -406,81 +293,6 @@ function PlayerView({
 }
 
 // ---------------------------------------------------------------------------
-// Shared table
-// ---------------------------------------------------------------------------
-
-function ReleasesTable({
-  title,
-  rows,
-  playerMap,
-}: {
-  title: string;
-  rows: ReleaseRead[];
-  playerMap: Map<number, PlayerRead>;
-}) {
-  return (
-    <div>
-      <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
-        {title}
-      </h2>
-      <div className="rounded-lg border border-border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Player</TableHead>
-              <TableHead>Club</TableHead>
-              <TableHead>Effective date</TableHead>
-              <TableHead>Document</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Date</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => {
-              const player = playerMap.get(r.player_id);
-              return (
-                <TableRow key={r.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium">
-                    {player?.full_name ?? `Player ${r.player_id}`}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    Club {r.from_club_id}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {r.effective_date ? formatDate(r.effective_date) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    {r.documents.length > 0 ? (
-                      <a
-                        href={r.documents[0].file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        <FileText className="h-3 w-3" />
-                        {r.documents[0].file_name}
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={r.status} />
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {r.confirmed_at ? formatDate(r.confirmed_at) : formatDate(r.created_at)}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -493,11 +305,13 @@ export default function ReleasesPage() {
   const { data: releases = [], isLoading, error, refetch } = useQuery<ReleaseRead[]>({
     queryKey: ["releases"],
     queryFn: releasesApi.list,
+    enabled: !isPureClubAdmin,
   });
 
   const { data: players = [] } = useQuery<PlayerRead[]>({
     queryKey: ["players"],
     queryFn: playersApi.list,
+    enabled: !isPureClubAdmin,
   });
   const playerMap = new Map(players.map((p) => [p.id, p]));
 
@@ -507,21 +321,17 @@ export default function ReleasesPage() {
         title="Releases"
         description={
           isPureClubAdmin
-            ? "Release players from your club. Squad must be submitted first."
+            ? "Release players from your club"
             : "Release notices from your club"
         }
       />
 
-      {isLoading ? (
-        <DataTableSkeleton columns={6} />
+      {isPureClubAdmin && user?.club_id ? (
+        <ClubAdminView clubId={user.club_id} />
+      ) : isLoading ? (
+        <DataTableSkeleton columns={4} />
       ) : error ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
-      ) : isPureClubAdmin && user?.club_id ? (
-        <ClubAdminView
-          clubId={user.club_id}
-          releases={releases}
-          playerMap={playerMap}
-        />
       ) : user?.player_id ? (
         <PlayerView
           playerId={user.player_id}

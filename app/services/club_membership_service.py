@@ -27,6 +27,7 @@ from app.models.club_membership import (
     ClubMembershipRequestStatus,
 )
 from app.models.player import Player
+from app.models.season import Season
 from app.models.user import User
 from app.schemas.club_membership import ClubMembershipRequestCreate
 from app.services import audit_service
@@ -238,12 +239,21 @@ def release_player(
 
     Guards:
       - player must be in the caller's club
-      - should not be in an ACTIVE season roster (checked in registration_service)
+      - blocked during an active season (roster is locked once a season starts)
     """
     if player.club_id != current_user.club_id:
         return None, "You can only release players from your own club."
     if player.club_id is None:
         return None, "Player is not currently in any club."
+
+    seasons = list(
+        db.execute(select(Season).where(Season.is_archived.is_(False))).scalars().all()
+    )
+    if any(s.is_locked for s in seasons):
+        return None, (
+            "Cannot release a player while a season is active. "
+            "Releases are only allowed outside of the playing season."
+        )
 
     player.club_id = None
 
