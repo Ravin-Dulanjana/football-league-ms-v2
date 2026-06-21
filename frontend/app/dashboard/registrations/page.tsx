@@ -6,7 +6,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { CheckCheck, ClipboardList, Plus } from "lucide-react";
+import { ClipboardList, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ConfirmDialog,
   DataTableSkeleton,
   EmptyState,
   ErrorState,
@@ -47,11 +46,13 @@ import type { PlayerRead, RegistrationRequestRead, SeasonRead } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Create dialog — club admin only
-// club_id is fixed to their own club; they only pick player + season
+// Sends a squad registration request to any club member (including admins and
+// the club admin themselves).  Backend scopes the player list to the caller's
+// club, so no additional filtering is needed here.
 // ---------------------------------------------------------------------------
 
 const schema = z.object({
-  player_id: z.number().int().positive("Select a player"),
+  player_id: z.number().int().positive("Select a member"),
   season_id: z.number().int().positive("Select a season"),
 });
 type FormData = z.infer<typeof schema>;
@@ -66,6 +67,8 @@ function CreateDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  // Backend automatically scopes GET /players/ to the caller's club when the
+  // caller is a club_admin, so this list only shows club members.
   const { data: players } = useQuery<PlayerRead[]>({
     queryKey: ["players"],
     queryFn: playersApi.list,
@@ -91,7 +94,7 @@ function CreateDialog({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      toast.success("Registration request sent — player will be notified");
+      toast.success("Registration request sent — the member will be notified");
       onOpenChange(false);
       form.reset();
     },
@@ -105,14 +108,14 @@ function CreateDialog({
           <DialogTitle>Send registration request</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground -mt-2">
-          The player will see this request and must acknowledge it to be registered.
+          The member will see this request and must acknowledge it to be registered for the season.
         </p>
         <form
           onSubmit={form.handleSubmit((d) => mutation.mutate(d))}
           className="space-y-4"
         >
           <div className="space-y-1.5">
-            <Label>Player *</Label>
+            <Label>Member *</Label>
             <Controller
               control={form.control}
               name="player_id"
@@ -122,7 +125,7 @@ function CreateDialog({
                   value={field.value ? String(field.value) : ""}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select player" />
+                    <SelectValue placeholder="Select club member" />
                   </SelectTrigger>
                   <SelectContent>
                     {players?.map((p) => (
@@ -189,7 +192,7 @@ function CreateDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Helpers: resolve names from IDs
+// Name maps helper
 // ---------------------------------------------------------------------------
 
 function useNameMaps() {
@@ -207,7 +210,7 @@ function useNameMaps() {
 }
 
 // ---------------------------------------------------------------------------
-// Club admin view — sent requests
+// Club admin view — outgoing squad registration requests
 // ---------------------------------------------------------------------------
 
 function ClubAdminView({
@@ -239,7 +242,7 @@ function ClubAdminView({
       {mine.length === 0 ? (
         <EmptyState
           title="No registration requests sent"
-          description="Send a registration request to invite a player to your club"
+          description="Send a registration request to add any club member to the season squad"
           icon={<ClipboardList className="h-6 w-6" />}
           action={{ label: "Send request", onClick: () => setCreateOpen(true) }}
         />
@@ -247,7 +250,7 @@ function ClubAdminView({
         <>
           {pending.length > 0 && (
             <RegistrationsTable
-              title={`Awaiting player acknowledgement (${pending.length})`}
+              title={`Awaiting acknowledgement (${pending.length})`}
               rows={pending}
               playerMap={playerMap}
               seasonMap={seasonMap}
@@ -265,107 +268,6 @@ function ClubAdminView({
       )}
 
       <CreateDialog clubId={clubId} open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Player view — incoming requests with Acknowledge button
-// ---------------------------------------------------------------------------
-
-function PlayerView({
-  playerId,
-  requests,
-  playerMap,
-  seasonMap,
-}: {
-  playerId: number;
-  requests: RegistrationRequestRead[];
-  playerMap: Map<number, string>;
-  seasonMap: Map<number, string>;
-}) {
-  const [ackTarget, setAckTarget] = useState<number | null>(null);
-  const queryClient = useQueryClient();
-
-  const ackMutation = useMutation({
-    mutationFn: (id: number) => registrationsApi.decide(id, "accept"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      toast.success("Registration acknowledged — you are now registered");
-      setAckTarget(null);
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const mine = requests.filter((r) => r.player_id === playerId);
-  const pending = mine.filter((r) => r.status === "pending_player_confirmation");
-  const history = mine.filter((r) => r.status !== "pending_player_confirmation");
-
-  if (mine.length === 0) {
-    return (
-      <EmptyState
-        title="No registration requests"
-        description="Your club will send you a registration request when registering you for a season"
-        icon={<ClipboardList className="h-6 w-6" />}
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {pending.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
-            Awaiting your acknowledgement ({pending.length})
-          </h2>
-          <div className="space-y-3">
-            {pending.map((r) => (
-              <div
-                key={r.id}
-                className="flex items-center justify-between p-4 rounded-lg border border-border bg-card"
-              >
-                <div>
-                  <p className="text-sm font-medium">
-                    Club {r.club_id} — {seasonMap.get(r.season_id) ?? `Season ${r.season_id}`}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Sent {formatDate(r.created_at)}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setAckTarget(r.id)}
-                >
-                  <CheckCheck className="h-3.5 w-3.5" />
-                  Acknowledge
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {history.length > 0 && (
-        <RegistrationsTable
-          title="History"
-          rows={history}
-          playerMap={playerMap}
-          seasonMap={seasonMap}
-        />
-      )}
-
-      {ackTarget !== null && (
-        <ConfirmDialog
-          open
-          onOpenChange={(v) => { if (!v) setAckTarget(null); }}
-          title="Acknowledge registration?"
-          description="By acknowledging, you confirm your registration with this club for the selected season."
-          confirmLabel="Acknowledge"
-          loading={ackMutation.isPending}
-          onConfirm={() => ackMutation.mutate(ackTarget!)}
-        />
-      )}
     </div>
   );
 }
@@ -394,7 +296,7 @@ function RegistrationsTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Player</TableHead>
+              <TableHead>Member</TableHead>
               <TableHead>Club</TableHead>
               <TableHead>Season</TableHead>
               <TableHead>Status</TableHead>
@@ -405,7 +307,7 @@ function RegistrationsTable({
             {rows.map((r) => (
               <TableRow key={r.id} className="hover:bg-muted/50">
                 <TableCell className="font-medium">
-                  {playerMap.get(r.player_id) ?? `Player ${r.player_id}`}
+                  {playerMap.get(r.player_id) ?? `Member ${r.player_id}`}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   Club {r.club_id}
@@ -429,54 +331,42 @@ function RegistrationsTable({
 }
 
 // ---------------------------------------------------------------------------
-// Main page
+// Main page — only visible to club admins and league-level admins
 // ---------------------------------------------------------------------------
 
 export default function RegistrationsPage() {
   const { user } = useCurrentUser();
   const { playerMap, seasonMap } = useNameMaps();
-  // Only pure club_admin manages outgoing requests.
-  // League admins (even with club_admin governance) see their own incoming requests.
-  const isPureClubAdmin = user?.role === "club_admin";
 
   const { data: requests = [], isLoading, error, refetch } = useQuery<RegistrationRequestRead[]>({
     queryKey: ["registrations"],
     queryFn: registrationsApi.list,
   });
 
+  const canManage = user?.role === "club_admin" || user?.role === "league_admin" || user?.role === "super_admin";
+
   return (
     <div>
       <PageHeader
         title="Registrations"
-        description={
-          isPureClubAdmin
-            ? "Registration requests sent to players on behalf of your club"
-            : "Registration requests from clubs"
-        }
+        description="Send squad registration requests to club members for the current season"
       />
 
       {isLoading ? (
         <DataTableSkeleton columns={5} />
       ) : error ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
-      ) : isPureClubAdmin && user?.club_id ? (
+      ) : canManage && user?.club_id ? (
         <ClubAdminView
           clubId={user.club_id}
           requests={requests}
           playerMap={playerMap}
           seasonMap={seasonMap}
         />
-      ) : user?.player_id ? (
-        <PlayerView
-          playerId={user.player_id}
-          requests={requests}
-          playerMap={playerMap}
-          seasonMap={seasonMap}
-        />
       ) : (
         <EmptyState
-          title="No registration requests"
-          description="Your club will send you a registration request for each season"
+          title="Registrations"
+          description="This area is for club admins to manage squad registrations. Check My Profile for your own registration requests."
           icon={<ClipboardList className="h-6 w-6" />}
         />
       )}

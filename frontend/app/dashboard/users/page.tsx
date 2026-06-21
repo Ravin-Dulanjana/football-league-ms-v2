@@ -541,7 +541,7 @@ export default function UsersPage() {
     <div>
       <PageHeader
         title="Members"
-        description={isClubAdmin ? "Everyone in your club" : "All members in the league"}
+        description="All members in the league"
         action={
           (isLeagueLevel || isClubAdmin) && tab === "active" ? (
             <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">

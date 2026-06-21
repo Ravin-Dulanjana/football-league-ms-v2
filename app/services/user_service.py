@@ -129,16 +129,12 @@ def get_all_users(
     include_deleted: bool = False,
 ) -> list[User]:
     """
-    Queryset-as-access-control:
-      super_admin  — all users; with include_deleted=True sees soft-deleted too
-      league_admin — all non-deleted users
-      club_admin   — all non-deleted users whose club_id matches theirs
+    All authenticated users can see all league members.
+    super_admin with include_deleted=True also sees soft-deleted accounts.
     """
     q = select(User)
     if not (is_super_admin(current_user) and include_deleted):
         q = q.where(User.is_deleted.is_(False))
-    if current_user.role == "club_admin" and current_user.club_id:
-        q = q.where(User.club_id == current_user.club_id)
     users = list(db.execute(q.order_by(User.id)).scalars().all())
     attach_governance_roles(db, users)
     return attach_player_names(db, users)

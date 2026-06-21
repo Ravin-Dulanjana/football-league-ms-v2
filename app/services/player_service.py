@@ -26,12 +26,8 @@ def get_all_players(
     free_only: bool = False,
 ) -> list[Player]:
     """
-    Return player records only — exclude entries linked to club_staff users.
-
-    A player record is created for every account with personal details,
-    regardless of member_type.  This filter ensures the players list only
-    shows actual footballers (member_type = 'player') or unlinked profiles
-    (no user account yet).
+    Return player records for all members (player, club_admin, league_admin).
+    Excludes club_staff-only accounts (non-playing staff).
 
     club_id:   if provided (not sentinel), filter to that club.
     free_only: if True, return only players with no club (club_id IS NULL).
@@ -39,7 +35,7 @@ def get_all_players(
     q = (
         select(Player)
         .outerjoin(User, User.player_id == Player.id)
-        .where((User.member_type == "player") | (User.id.is_(None)))
+        .where((User.member_type.in_(["player", "user"])) | (User.id.is_(None)))
     )
     if free_only:
         q = q.where(Player.club_id.is_(None))

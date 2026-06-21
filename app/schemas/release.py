@@ -57,6 +57,9 @@ class ReleaseRead(BaseModel):
 class PlayerDocumentCreate(BaseModel):
     s3_key: str
     file_name: str
+    year: int | None = None
+    league_name: str | None = None
+    club_name: str | None = None
     description: str | None = None
 
 
@@ -66,6 +69,12 @@ class PlayerDocumentRead(BaseModel):
     s3_key: str
     file_name: str
     description: str | None
+    year: int | None
+    league_name: str | None
+    club_name: str | None
+    is_visible: bool
+    source: str
+    release_id: int | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -75,4 +84,5 @@ class PlayerDocumentRead(BaseModel):
     def file_url(self) -> str:
         if not settings.cloudfront_domain:
             return self.s3_key
-        return f"https://{settings.cloudfront_domain}/{self.s3_key}"
+        domain = settings.cloudfront_domain.removeprefix("https://")
+        return f"https://{domain}/{self.s3_key}"

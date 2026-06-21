@@ -10,6 +10,8 @@ import {
   Building2,
   CalendarDays,
   Camera,
+  CheckCircle2,
+  ClipboardList,
   CreditCard,
   ExternalLink,
   FileText,
@@ -19,6 +21,8 @@ import {
   Shield,
   Upload,
   User,
+  UserPlus,
+  XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,12 +36,26 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/DataTable";
 import { ImageLightbox } from "@/components/shared/ImageLightbox";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { clubsApi, playersApi } from "@/lib/api";
-import type { ClubRead, PlayerRead } from "@/types";
+import { clubMembershipsApi, clubsApi, playersApi, registrationsApi } from "@/lib/api";
+import { formatRelative } from "@/lib/utils";
+import type {
+  ClubMembershipRequestRead,
+  ClubRead,
+  PlayerRead,
+  RegistrationRequestRead,
+} from "@/types";
 
 // ---------------------------------------------------------------------------
 // Edit name dialog
@@ -133,18 +151,15 @@ function PhotoUploadButton({
     if (!file) return;
     setUploading(true);
     try {
-      // 1. Get presigned URL
       const { url, fields, key } = await playersApi.myPhotoUploadUrl(
         file.name,
         file.type || "image/jpeg"
       );
-      // 2. Upload directly to S3
       const formData = new FormData();
       Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
       formData.append("file", file);
       const s3Res = await fetch(url, { method: "POST", body: formData });
       if (!s3Res.ok) throw new Error("Upload to S3 failed");
-      // 3. Save the key
       await playersApi.update(playerId, { photo_key: key });
       queryClient.invalidateQueries({ queryKey: ["player", playerId] });
       toast.success("Profile photo updated");
@@ -287,13 +302,279 @@ function NicDocumentSection({
 }
 
 // ---------------------------------------------------------------------------
+// Club Invites section (for users without a club)
+// ---------------------------------------------------------------------------
+
+function ClubInvitesSection() {
+  const queryClient = useQueryClient();
+
+  const { data: requests = [], isLoading } = useQuery<ClubMembershipRequestRead[]>({
+    queryKey: ["club-memberships", "requests"],
+    queryFn: clubMembershipsApi.listRequests,
+  });
+
+  const { data: clubs } = useQuery<ClubRead[]>({
+    queryKey: ["clubs"],
+    queryFn: clubsApi.list,
+  });
+  const clubMap = Object.fromEntries((clubs ?? []).map((c) => [c.id, c.name]));
+
+  const decideMutation = useMutation({
+    mutationFn: ({ id, decision }: { id: number; decision: "accept" | "reject" }) =>
+      clubMembershipsApi.decide(id, { decision }),
+    onSuccess: (_, { decision }) => {
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["club-memberships"] });
+      queryClient.invalidateQueries({ queryKey: ["players"] });
+      if (decision === "accept") {
+        toast.success("You've joined the club! Welcome to the squad.");
+        window.location.assign("/dashboard/profile");
+      } else {
+        toast.success("Invite declined");
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const pending = requests.filter((r) => r.status === "pending");
+  const past = requests.filter((r) => r.status !== "pending");
+
+  if (isLoading) return null;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Club Invites
+        </p>
+        {pending.length > 0 && (
+          <span className="text-[10px] font-bold bg-primary text-white px-1.5 py-0.5 rounded-full">
+            {pending.length}
+          </span>
+        )}
+      </div>
+
+      {requests.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-5 text-center">
+          <UserPlus className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">No club invites yet</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            A club admin can invite you to join their club
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {pending.length > 0 && (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Pending ({pending.length})
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                {pending.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {clubMap[req.club_id] ?? `Club #${req.club_id}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Sent {formatRelative(req.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        onClick={() => decideMutation.mutate({ id: req.id, decision: "accept" })}
+                        disabled={decideMutation.isPending}
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        Accept
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1"
+                        onClick={() => decideMutation.mutate({ id: req.id, decision: "reject" })}
+                        disabled={decideMutation.isPending}
+                      >
+                        <XCircle className="h-3 w-3" />
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {past.length > 0 && (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  History
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Club</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Responded</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {past.map((req) => (
+                    <TableRow key={req.id}>
+                      <TableCell className="text-sm font-medium">
+                        {clubMap[req.club_id] ?? `Club #${req.club_id}`}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={req.status} />
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {req.responded_at ? formatRelative(req.responded_at) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// My Registrations section (for users who are in a club)
+// ---------------------------------------------------------------------------
+
+function MyRegistrationsSection({ playerId }: { playerId: number }) {
+  const queryClient = useQueryClient();
+
+  const { data: requests = [], isLoading } = useQuery<RegistrationRequestRead[]>({
+    queryKey: ["registrations"],
+    queryFn: registrationsApi.list,
+  });
+
+  const myRequests = requests.filter((r) => r.player_id === playerId);
+  const pending = myRequests.filter((r) => r.status === "pending_player_confirmation");
+  const past = myRequests.filter((r) => r.status !== "pending_player_confirmation");
+
+  const decideMutation = useMutation({
+    mutationFn: (id: number) => registrationsApi.decide(id, "accept"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      toast.success("Registration confirmed — you are now registered for this season");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (isLoading) return null;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Season Registrations
+        </p>
+        {pending.length > 0 && (
+          <span className="text-[10px] font-bold bg-primary text-white px-1.5 py-0.5 rounded-full">
+            {pending.length}
+          </span>
+        )}
+      </div>
+
+      {myRequests.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-5 text-center">
+          <ClipboardList className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">No season registration requests yet</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Your club admin will send you a request to join the season squad
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          {pending.length > 0 && (
+            <>
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Pending acknowledgement ({pending.length})
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                {pending.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">Season registration request</p>
+                      <p className="text-xs text-muted-foreground">
+                        Season #{req.season_id} · {formatRelative(req.created_at)}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => decideMutation.mutate(req.id)}
+                      disabled={decideMutation.isPending}
+                    >
+                      <CheckCircle2 className="h-3 w-3" />
+                      Acknowledge
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {past.length > 0 && (
+            <>
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  History
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Season</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {past.map((req) => (
+                    <TableRow key={req.id}>
+                      <TableCell className="text-sm">Season #{req.season_id}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={req.status} />
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatRelative(req.created_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main profile page
 // ---------------------------------------------------------------------------
 
 export default function ProfilePage() {
   const [editNameOpen, setEditNameOpen] = useState(false);
   const queryClient = useQueryClient();
-  const { user, isLoading: userLoading } = useCurrentUser();
+  const { user, isLoading: userLoading, isSuperAdmin } = useCurrentUser();
+
+  const hasClub = !!user?.club_id;
 
   const { data: player } = useQuery<PlayerRead>({
     queryKey: ["player", user?.player_id],
@@ -480,6 +761,13 @@ export default function ProfilePage() {
             Contact a league admin to link your identity
           </p>
         </div>
+      )}
+
+      {/* Club invites (users without a club) or Season registrations (users with a club) */}
+      {!isSuperAdmin && user.player_id && (
+        !hasClub
+          ? <ClubInvitesSection />
+          : <MyRegistrationsSection playerId={user.player_id} />
       )}
 
       {/* Edit name dialog */}
