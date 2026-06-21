@@ -15,9 +15,11 @@ from app.models.registration import (
     RegistrationRequestStatus,
     RegistrationType,
 )
+from app.models.user import User
 from app.schemas.registration import RegistrationRequestCreate
 from app.services import audit_service
 from app.services.events import publish_event
+from app.services.notification_service import notify_club_admins, notify_user
 
 logger = get_logger(__name__)
 
@@ -105,6 +107,11 @@ def create_request(
     if len(squad_count) >= 30:
         return None, "Maximum of 30 players per club per season already reached."
 
+    # Look up the player's linked user for in-app notification and email.
+    player_user = db.execute(
+        select(User).where(User.player_id == data.player_id)
+    ).scalar_one_or_none()
+
     req = RegistrationRequest(
         season_id=data.season_id,
         club_id=data.club_id,
@@ -126,6 +133,20 @@ def create_request(
             "season_id": data.season_id,
         },
     )
+    # Capture names before commit expires relationships.
+    club_name = req.club.name
+    season_name = req.season.name
+    player_name = req.player.full_name
+    if player_user is not None:
+        notify_user(
+            db,
+            user_id=player_user.id,
+            event_type="registration.requested",
+            message=(
+                f"You have been added to {club_name}'s squad for {season_name}. "
+                "Log in to acknowledge your registration."
+            ),
+        )
     db.commit()
     db.refresh(req)
     logger.info(
@@ -136,20 +157,18 @@ def create_request(
         }
     )
 
-    # Notify club admin that a player wants to join.
-    # req.club, req.player, req.season are lazy-loaded here via the still-open
-    # session. Fire-and-forget: a SQS outage will not fail the request itself.
+    # Email the player — they need to acknowledge the request.
     publish_event(
         "registration.requested",
         {
             "registration_request_id": req.id,
-            "player_id": req.player_id,
-            "player_name": req.player.full_name,
-            "club_id": req.club_id,
-            "club_name": req.club.name,
-            "season_id": req.season_id,
-            "season_name": req.season.name,
-            "recipient_email": req.club.email,
+            "player_id": data.player_id,
+            "player_name": player_name,
+            "club_id": data.club_id,
+            "club_name": club_name,
+            "season_id": data.season_id,
+            "season_name": season_name,
+            "recipient_email": player_user.email if player_user else None,
         },
     )
 
@@ -185,6 +204,13 @@ def decide_request(
 
     now = datetime.now(tz=UTC)
 
+    # Capture names before any flush/commit expires relationships.
+    player_name = req.player.full_name
+    club_name = req.club.name
+    season_name = req.season.name
+    club_email = req.club.email
+    club_id = req.club_id
+
     # accept — create registration atomically
     req.status = RegistrationRequestStatus.ACCEPTED
     req.responded_at = now
@@ -204,6 +230,15 @@ def decide_request(
         entity_type="RegistrationRequest",
         entity_id=req.id,
     )
+    notify_club_admins(
+        db,
+        club_id=club_id,
+        event_type="registration.accepted",
+        message=(
+            f"{player_name} has acknowledged their squad registration for "
+            f"{club_name} in {season_name}."
+        ),
+    )
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(req)
     logger.info(
@@ -214,14 +249,15 @@ def decide_request(
             "request_id": request_id_var.get(),
         }
     )
+    # Email the club (contact address) that the player acknowledged.
     publish_event(
         "registration.accepted",
         {
             "registration_request_id": req.id,
-            "player_name": req.player.full_name,
-            "club_name": req.club.name,
-            "season_name": req.season.name,
-            "recipient_email": req.club.email,
+            "player_name": player_name,
+            "club_name": club_name,
+            "season_name": season_name,
+            "recipient_email": club_email,
         },
     )
     return req, None
