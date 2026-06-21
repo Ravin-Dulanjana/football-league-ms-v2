@@ -39,6 +39,7 @@ import type {
   NotificationPreferenceUpdate,
   NotificationRead,
   PlayerCreate,
+  PlayerDocumentCreate,
   PlayerDocumentRead,
   PlayerRead,
   PlayerSeasonRegistrationRead,
@@ -226,6 +227,24 @@ export const playersApi = {
     }),
   getDocuments: (playerId: number) =>
     apiFetch<PlayerDocumentRead[]>(`/players/${playerId}/documents/`),
+  // Release letters (My Docs) — personal release history
+  myReleaseLetters: () =>
+    apiFetch<PlayerDocumentRead[]>("/players/me/release-letters/"),
+  myReleaseLetterUploadUrl: (filename: string, contentType = "application/pdf") =>
+    apiFetch<UploadUrlResponse>(
+      `/players/me/release-letter-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,
+      { method: "POST" }
+    ),
+  createReleaseLetterEntry: (data: PlayerDocumentCreate) =>
+    apiFetch<PlayerDocumentRead>("/players/me/release-letters/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  toggleReleaseLetterVisibility: (docId: number) =>
+    apiFetch<PlayerDocumentRead>(`/players/me/release-letters/${docId}/toggle-visibility/`, {
+      method: "PATCH",
+    }),
+  // Legacy
   myDocumentUploadUrl: (filename: string, contentType = "application/pdf") =>
     apiFetch<UploadUrlResponse>(
       `/players/me/document-upload-url/?filename=${encodeURIComponent(filename)}&content_type=${encodeURIComponent(contentType)}`,

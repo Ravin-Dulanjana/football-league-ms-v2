@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.dependencies import CurrentUser
 from app.middleware.logging import get_logger
 from app.middleware.request_id import request_id_var
+from app.models.club import Club
 from app.models.player import Player
 from app.models.release import (
     PlayerDocument,
@@ -110,6 +111,25 @@ def create_release(
         file_name=data.file_name,
     )
     db.add(document)
+
+    # Auto-create a personal release history entry for the player.
+    # year defaults to effective_date year, or current year if no date given.
+    from datetime import date as _date
+
+    release_year = (data.effective_date or _date.today()).year
+    club = db.get(Club, current_user.club_id)
+    personal_doc = PlayerDocument(
+        player_id=player.id,
+        s3_key=data.s3_key,
+        file_name=data.file_name,
+        year=release_year,
+        league_name="Wattala Football League",
+        club_name=club.name if club else None,
+        is_visible=True,
+        source="in_league",
+        release_id=release.id,
+    )
+    db.add(personal_doc)
 
     # Clear club membership immediately
     released_from_club_id = current_user.club_id
@@ -257,16 +277,32 @@ def decide_release(
 # ---------------------------------------------------------------------------
 
 
-def get_player_documents(db: Session, player_id: int) -> list[PlayerDocument]:
-    return list(
-        db.execute(
-            select(PlayerDocument)
-            .where(PlayerDocument.player_id == player_id)
-            .order_by(PlayerDocument.id.desc())
-        )
-        .scalars()
-        .all()
+def get_player_documents(
+    db: Session, player_id: int, *, visible_only: bool = False
+) -> list[PlayerDocument]:
+    """Return personal release history docs, ordered by year desc then id desc."""
+    q = select(PlayerDocument).where(PlayerDocument.player_id == player_id)
+    if visible_only:
+        q = q.where(PlayerDocument.is_visible.is_(True))
+    q = q.order_by(
+        PlayerDocument.year.desc().nullslast(),
+        PlayerDocument.id.desc(),
     )
+    return list(db.execute(q).scalars().all())
+
+
+def toggle_player_document_visibility(
+    db: Session, doc_id: int, current_user: CurrentUser
+) -> tuple[PlayerDocument | None, str | None]:
+    doc = db.get(PlayerDocument, doc_id)
+    if doc is None:
+        return None, "Document not found."
+    if doc.player_id != current_user.player_id:
+        return None, "You can only modify your own documents."
+    doc.is_visible = not doc.is_visible
+    db.commit()
+    db.refresh(doc)
+    return doc, None
 
 
 def create_player_document(
@@ -280,6 +316,11 @@ def create_player_document(
         s3_key=data.s3_key,
         file_name=data.file_name,
         description=data.description,
+        year=data.year,
+        league_name=data.league_name,
+        club_name=data.club_name,
+        is_visible=True,
+        source="manual",
     )
     db.add(doc)
     db.flush()

@@ -388,7 +388,22 @@ export interface PlayerDocumentRead {
   file_name: string;
   file_url: string;
   description: string | null;
+  year: number | null;
+  league_name: string | null;
+  club_name: string | null;
+  is_visible: boolean;
+  source: "manual" | "in_league";
+  release_id: number | null;
   created_at: string;
+}
+
+export interface PlayerDocumentCreate {
+  s3_key: string;
+  file_name: string;
+  year?: number;
+  league_name?: string;
+  club_name?: string;
+  description?: string;
 }
 
 // ---------------------------------------------------------------------------

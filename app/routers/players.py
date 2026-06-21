@@ -206,14 +206,14 @@ def save_my_nic_document(
 
 
 # ---------------------------------------------------------------------------
-# Player documents — self-uploaded external release/transfer docs
+# Release history (personal docs) — "My Docs"
 # ---------------------------------------------------------------------------
 
 
 @router.get(
     "/{player_id}/documents/",
     response_model=list[PlayerDocumentRead],
-    summary="List external documents uploaded by or for a player",
+    summary="List release history visible to admins (public-only for non-owners)",
 )
 def list_player_documents(
     player_id: int,
@@ -227,24 +227,97 @@ def list_player_documents(
             status.HTTP_403_FORBIDDEN,
             "You can only view documents for players in your club or your own profile.",
         )
-    return release_service.get_player_documents(db, player_id)
+    return release_service.get_player_documents(db, player_id, visible_only=not is_self)
+
+
+@router.get(
+    "/me/release-letters/",
+    response_model=list[PlayerDocumentRead],
+    summary="Get all my release docs (visible + private)",
+)
+def list_my_release_letters(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list:
+    if not current_user.player_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No player profile linked to your account.",
+        )
+    return release_service.get_player_documents(db, current_user.player_id)
+
+
+@router.post(
+    "/me/release-letter-upload-url/",
+    response_model=UploadUrlResponse,
+    summary="Get a pre-signed URL to upload a personal release letter",
+)
+def get_my_release_letter_upload_url(
+    filename: str,
+    content_type: str = "application/pdf",
+    _: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    return storage.generate_upload_url(
+        folder="player-docs",
+        filename=filename,
+        content_type=content_type,
+    )
+
+
+@router.post(
+    "/me/release-letters/",
+    response_model=PlayerDocumentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Save a manually-uploaded release letter",
+)
+def create_my_release_letter(
+    data: PlayerDocumentCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> object:
+    if not current_user.player_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No player profile linked to your account.",
+        )
+    return release_service.create_player_document(
+        db, current_user.player_id, data, current_user
+    )
+
+
+@router.patch(
+    "/me/release-letters/{doc_id}/toggle-visibility/",
+    response_model=PlayerDocumentRead,
+    summary="Toggle a release letter between visible (public) and private",
+)
+def toggle_release_letter_visibility(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> object:
+    doc, err = release_service.toggle_player_document_visibility(
+        db, doc_id, current_user
+    )
+    if err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, err)
+    return doc
+
+
+# ---------------------------------------------------------------------------
+# Legacy endpoints kept for backward compatibility
+# ---------------------------------------------------------------------------
 
 
 @router.post(
     "/me/document-upload-url/",
     response_model=UploadUrlResponse,
-    summary="Get a pre-signed URL to upload a personal release/transfer document",
+    summary="Deprecated: use /me/release-letter-upload-url/ instead",
 )
 def get_my_document_upload_url(
     filename: str,
     content_type: str = "application/pdf",
     _: CurrentUser = Depends(get_current_user),
 ) -> dict[str, object]:
-    """
-    Returns a pre-signed POST URL for uploading a personal document (e.g. an
-    external release letter from another league). Upload the file to S3 first,
-    then call POST /players/me/documents/ with the returned key.
-    """
     return storage.generate_upload_url(
         folder="player-docs",
         filename=filename,
@@ -256,7 +329,7 @@ def get_my_document_upload_url(
     "/me/documents/",
     response_model=PlayerDocumentRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Save a personal document record after uploading to S3",
+    summary="Deprecated: use /me/release-letters/ instead",
 )
 def save_my_document(
     data: PlayerDocumentCreate,

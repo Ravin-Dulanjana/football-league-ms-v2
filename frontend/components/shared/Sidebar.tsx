@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Bell,
+  BookOpen,
   Building2,
   ClipboardList,
   FileText,
@@ -16,23 +17,26 @@ import {
   LogOut,
   ScrollText,
   Shield,
-  UserCheck,
   Users,
   UserCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { clubMembershipsApi, registrationsApi } from "@/lib/api";
+import type { ClubMembershipRequestRead, RegistrationRequestRead } from "@/types";
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ElementType;
   exact?: boolean;
+  badge?: number;
 }
 
 interface NavGroup {
@@ -46,10 +50,31 @@ export function Sidebar() {
   const { user, isLoading, role, isClubAdmin, isLeagueLevel, isSuperAdmin } = useCurrentUser();
 
   const hasClub = !!user?.club_id;
-  // Any non-super-admin without a club sees Invites instead of ops items
-  const noClubUser = !hasClub && !isSuperAdmin;
-  // Registrations and releases require club membership (super_admin always has access)
-  const canSeeOps = isSuperAdmin || hasClub;
+  const isRegularUser = !isSuperAdmin;
+
+  // Pending invite count for users without a club
+  const { data: membershipRequests } = useQuery<ClubMembershipRequestRead[]>({
+    queryKey: ["club-memberships", "requests"],
+    queryFn: clubMembershipsApi.listRequests,
+    enabled: isRegularUser && !hasClub,
+    staleTime: 30_000,
+  });
+  const pendingInviteCount = (membershipRequests ?? []).filter(
+    (r) => r.status === "pending"
+  ).length;
+
+  // Pending registration request count for users with a club
+  const { data: regRequests } = useQuery<RegistrationRequestRead[]>({
+    queryKey: ["registrations"],
+    queryFn: registrationsApi.list,
+    enabled: isRegularUser && hasClub && !isClubAdmin,
+    staleTime: 30_000,
+  });
+  const pendingRegCount = (regRequests ?? []).filter(
+    (r) => r.status === "pending_player_confirmation"
+  ).length;
+
+  const profileBadge = !hasClub ? pendingInviteCount : pendingRegCount;
 
   const NAV_GROUPS: NavGroup[] = [
     {
@@ -59,19 +84,26 @@ export function Sidebar() {
         { label: "Clubs", href: "/dashboard/clubs", icon: Building2, exact: true },
         { label: "Members", href: "/dashboard/users", icon: Users },
         { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
-        { label: "My Profile", href: "/dashboard/profile", icon: UserCircle },
+        {
+          label: "My Profile",
+          href: "/dashboard/profile",
+          icon: UserCircle,
+          badge: profileBadge > 0 ? profileBadge : undefined,
+        },
         ...(hasClub
           ? [{ label: "My Club", href: `/dashboard/clubs/${user!.club_id}`, icon: Building2 }]
+          : []),
+        // All non-super_admin users get a personal release history page
+        ...(!isSuperAdmin
+          ? [{ label: "My Release Docs", href: "/dashboard/my-docs", icon: BookOpen }]
           : []),
       ],
     },
     {
       label: "Operations",
       items: [
-        ...(noClubUser
-          ? [{ label: "Invites", href: "/dashboard/club-memberships", icon: UserCheck }]
-          : []),
-        ...(canSeeOps
+        // Registrations & Releases: club admins and league admins only
+        ...(isClubAdmin || isLeagueLevel || isSuperAdmin
           ? [
               { label: "Registrations", href: "/dashboard/registrations", icon: ClipboardList },
               { label: "Releases", href: "/dashboard/releases", icon: FileText },
@@ -157,7 +189,17 @@ export function Sidebar() {
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
+                      <span className="truncate flex-1">{item.label}</span>
+                      {item.badge !== undefined && item.badge > 0 && (
+                        <span className={cn(
+                          "text-[10px] font-bold min-w-[18px] h-[18px] rounded-full flex items-center justify-center px-1",
+                          isActive
+                            ? "bg-white/20 text-white"
+                            : "bg-primary text-white"
+                        )}>
+                          {item.badge > 9 ? "9+" : item.badge}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

@@ -3,7 +3,17 @@ from __future__ import annotations
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, String, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -78,7 +88,14 @@ class ReleaseDocument(Base):
 
 
 class PlayerDocument(Base):
-    """Player-uploaded external release documents (e.g. from other leagues/clubs)."""
+    """
+    Personal release history entry for a player.
+
+    Created automatically when a player is released within our league
+    (source='in_league') or manually by the player for external releases
+    (source='manual').  is_visible controls whether club/league admins
+    can see it — False acts as a soft-delete / "make private".
+    """
 
     __tablename__ = "player_documents"
 
@@ -87,6 +104,18 @@ class PlayerDocument(Base):
     s3_key: Mapped[str] = mapped_column(String(512))
     file_name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(512))
+    # Structured release history fields
+    year: Mapped[int | None] = mapped_column(Integer)
+    league_name: Mapped[str | None] = mapped_column(String(255))
+    club_name: Mapped[str | None] = mapped_column(String(255))
+    # Visibility: True = visible to club/league admins, False = private (owner only)
+    is_visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 'manual' = player uploaded, 'in_league' = auto-created on release
+    source: Mapped[str] = mapped_column(String(50), default="manual")
+    # Populated for in_league entries only
+    release_id: Mapped[int | None] = mapped_column(
+        ForeignKey("player_releases.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
