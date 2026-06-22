@@ -31,6 +31,8 @@ from app.models.season import Season
 from app.models.user import User
 from app.schemas.club_membership import ClubMembershipRequestCreate
 from app.services import audit_service
+from app.services.events import publish_event
+from app.services.notification_service import notify_club_admins, notify_user
 
 logger = get_logger(__name__)
 
@@ -101,6 +103,11 @@ def create_invite(
     if existing_pending is not None:
         return None, "A pending invite for this player already exists."
 
+    # Grab the invited player's linked user now for notification + email.
+    invited_user = db.execute(
+        select(User).where(User.player_id == data.player_id)
+    ).scalar_one_or_none()
+
     req = ClubMembershipRequest(
         player_id=data.player_id,
         club_id=current_user.club_id,  # type: ignore[arg-type]
@@ -117,6 +124,14 @@ def create_invite(
         entity_id=req.id,
         details={"player_id": data.player_id, "club_id": current_user.club_id},
     )
+    club_name = req.club.name
+    if invited_user is not None:
+        notify_user(
+            db,
+            user_id=invited_user.id,
+            event_type="club_membership.invited",
+            message=f"You have been invited to join {club_name}.",
+        )
     db.commit()
     db.refresh(req)
     logger.info(
@@ -125,6 +140,15 @@ def create_invite(
             "request_id_db": req.id,
             "request_id": request_id_var.get(),
         }
+    )
+    publish_event(
+        "club_membership.invited",
+        {
+            "membership_request_id": req.id,
+            "player_id": data.player_id,
+            "club_name": club_name,
+            "recipient_email": invited_user.email if invited_user else None,
+        },
     )
     return req, None
 
@@ -149,6 +173,12 @@ def decide_invite(
         return None, "This invite has already been responded to."
     if decision not in ("accept", "reject"):
         return None, "Decision must be 'accept' or 'reject'."
+
+    # Capture names before any flush/commit expires relationships.
+    player_name = req.player.full_name
+    club_name = req.club.name
+    club_email = req.club.email
+    club_id = req.club_id
 
     now = datetime.now(tz=UTC)
     req.responded_at = now
@@ -197,6 +227,12 @@ def decide_invite(
             entity_id=req.id,
             details={"club_id": req.club_id},
         )
+        notify_club_admins(
+            db,
+            club_id=club_id,
+            event_type="club_membership.accepted",
+            message=f"{player_name} has accepted your invite and joined {club_name}.",
+        )
     else:
         req.status = ClubMembershipRequestStatus.REJECTED
         db.flush()
@@ -207,9 +243,25 @@ def decide_invite(
             entity_type="ClubMembershipRequest",
             entity_id=req.id,
         )
+        notify_club_admins(
+            db,
+            club_id=club_id,
+            event_type="club_membership.rejected",
+            message=f"{player_name} has declined your club invite to {club_name}.",
+        )
 
     db.commit()
     db.refresh(req)
+    publish_event(
+        f"club_membership.{decision}ed",
+        {
+            "membership_request_id": req.id,
+            "player_name": player_name,
+            "club_name": club_name,
+            "club_id": club_id,
+            "recipient_email": club_email,
+        },
+    )
     return req, None
 
 

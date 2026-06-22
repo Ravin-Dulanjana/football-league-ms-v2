@@ -28,8 +28,8 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { clubMembershipsApi, registrationsApi } from "@/lib/api";
-import type { ClubMembershipRequestRead, RegistrationRequestRead } from "@/types";
+import { clubMembershipsApi, notificationsApi, registrationsApi } from "@/lib/api";
+import type { ClubMembershipRequestRead, NotificationRead, RegistrationRequestRead } from "@/types";
 
 interface NavItem {
   label: string;
@@ -76,6 +76,15 @@ export function Sidebar() {
 
   const profileBadge = !hasClub ? pendingInviteCount : pendingRegCount;
 
+  // Unread notification count for the Bell badge
+  const { data: notifications } = useQuery<NotificationRead[]>({
+    queryKey: ["notifications"],
+    queryFn: notificationsApi.list,
+    enabled: isRegularUser,
+    staleTime: 30_000,
+  });
+  const unreadCount = (notifications ?? []).filter((n) => !n.is_read).length;
+
   const NAV_GROUPS: NavGroup[] = [
     {
       label: "Overview",
@@ -83,7 +92,12 @@ export function Sidebar() {
         { label: "Dashboard", href: "/dashboard", icon: Home, exact: true },
         { label: "Clubs", href: "/dashboard/clubs", icon: Building2, exact: true },
         { label: "Members", href: "/dashboard/users", icon: Users },
-        { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
+        {
+          label: "Notifications",
+          href: "/dashboard/notifications",
+          icon: Bell,
+          badge: isRegularUser && unreadCount > 0 ? unreadCount : undefined,
+        },
         {
           label: "My Profile",
           href: "/dashboard/profile",

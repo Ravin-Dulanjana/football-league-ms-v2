@@ -22,6 +22,7 @@ from app.models.user_governance_role import UserGovernanceRole
 from app.schemas.release import PlayerDocumentCreate, ReleaseCreate
 from app.services import audit_service
 from app.services.events import publish_event
+from app.services.notification_service import notify_user
 from app.services.user_service import highest_role
 
 logger = get_logger(__name__)
@@ -131,12 +132,17 @@ def create_release(
     )
     db.add(personal_doc)
 
+    # Capture club details before clearing membership (club_id set to None below).
+    club = db.get(Club, current_user.club_id)
+    club_name = club.name if club else "your club"
+
     # Clear club membership immediately
     released_from_club_id = current_user.club_id
     player.club_id = None
     linked_user = db.execute(
         select(User).where(User.player_id == player.id)
     ).scalar_one_or_none()
+    player_email = linked_user.email if linked_user else None
     if linked_user is not None:
         linked_user.club_id = None
         # If the released player is also a club_admin of this club, revoke that role.
@@ -179,6 +185,17 @@ def create_release(
             "from_club_id": release.from_club_id,
         },
     )
+    # Notify the released player in-app.
+    player_name = release.player.full_name
+    if linked_user is not None:
+        notify_user(
+            db,
+            user_id=linked_user.id,
+            event_type="release.confirmed",
+            message=(
+                f"You have been released from {club_name}. You are now a free player."
+            ),
+        )
     db.commit()
     db.refresh(release)
     logger.info(
@@ -190,13 +207,14 @@ def create_release(
         }
     )
 
+    # Email the released player.
     publish_event(
         "release.confirmed",
         {
             "release_id": release.id,
-            "player_name": release.player.full_name,
-            "club_name": release.from_club.name,
-            "recipient_email": release.from_club.email,
+            "player_name": player_name,
+            "club_name": club_name,
+            "recipient_email": player_email,
         },
     )
 

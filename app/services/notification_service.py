@@ -30,6 +30,52 @@ from app.schemas.notification import NotificationPreferenceUpdate
 # ---------------------------------------------------------------------------
 
 
+def notify_user(
+    db: Session,
+    *,
+    user_id: int,
+    event_type: str,
+    message: str,
+) -> None:
+    """Create one in-app notification for a specific user. Uses flush()."""
+    db.add(Notification(user_id=user_id, event_type=event_type, message=message))
+    db.flush()
+
+
+def notify_club_admins(
+    db: Session,
+    *,
+    club_id: int,
+    event_type: str,
+    message: str,
+) -> int:
+    """
+    Notify every club_admin governance role holder for a given club.
+
+    Uses UserGovernanceRole so dual-role users (club_admin + league_admin)
+    are not missed when User.role reflects the higher role.
+
+    Returns the number of notifications created.
+    """
+    from app.models.user_governance_role import UserGovernanceRole  # noqa: PLC0415
+
+    gov_roles = list(
+        db.execute(
+            select(UserGovernanceRole).where(
+                UserGovernanceRole.role == "club_admin",
+                UserGovernanceRole.club_id == club_id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for r in gov_roles:
+        db.add(Notification(user_id=r.user_id, event_type=event_type, message=message))
+    if gov_roles:
+        db.flush()
+    return len(gov_roles)
+
+
 def notify_by_role(
     db: Session,
     *,
