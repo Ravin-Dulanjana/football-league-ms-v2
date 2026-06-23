@@ -22,8 +22,6 @@ What gets created
   Free players : 10
   Total users  : 29 non-super-admin accounts
 
-Squad size limits on Season 2025: min 2, max 5
-
 All demo accounts use password: Demo@2026!
 
 Flow
@@ -405,7 +403,6 @@ def dry_run() -> None:
     for fp in FREE_PLAYERS:
         print(f"  Free player  : {fp['full_name']} ({fp['email']})")
     print(f"\n  Total new accounts : {total}")
-    print("  Squad limits 2025  : min 2 / max 5")
     print(f"  Demo password      : {DEMO_PASSWORD}")
     print()
 
@@ -436,8 +433,6 @@ def seed(base: str, admin_email: str, admin_password: str) -> None:  # noqa: C90
             "registration_open_at": "2024-01-01T00:00:00+00:00",
             "registration_close_at": "2024-03-31T23:59:59+00:00",
             "season_end_date": "2024-12-31T23:59:59+00:00",
-            "min_squad_size": 2,
-            "max_squad_size": 5,
         },
         admin_token,
     )
@@ -456,8 +451,6 @@ def seed(base: str, admin_email: str, admin_password: str) -> None:  # noqa: C90
             "year": 2025,
             "registration_open_at": "2025-01-01T00:00:00+00:00",
             "registration_close_at": "2099-12-31T23:59:59+00:00",
-            "min_squad_size": 2,
-            "max_squad_size": 5,
         },
         admin_token,
     )
@@ -738,8 +731,7 @@ def seed(base: str, admin_email: str, admin_password: str) -> None:  # noqa: C90
 
     print("\n  Seasons  : WFL Premier 2024 (archived) | WFL Premier 2025 (archived)")
     print(f"  Clubs    : {', '.join(c['name'] for c in CLUBS)}")
-    print("  Players  : 12 registered in Season 2025 | 10 free players")
-    print("  Squad limits on 2025: min 2 / max 5\n")
+    print("  Players  : 12 registered in Season 2025 | 10 free players\n")
 
 
 # ---------------------------------------------------------------------------

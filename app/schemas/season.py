@@ -30,7 +30,7 @@ class SeasonCreate(BaseModel):
     registration_open_at: datetime
     registration_close_at: datetime
     season_end_date: datetime | None = None
-    min_squad_size: int = 5
+    min_squad_size: int = 17
     max_squad_size: int = 30
 
     @model_validator(mode="after")

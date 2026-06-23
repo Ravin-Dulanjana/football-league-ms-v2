@@ -20,7 +20,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "seasons",
-        sa.Column("min_squad_size", sa.Integer(), nullable=False, server_default="5"),
+        sa.Column("min_squad_size", sa.Integer(), nullable=False, server_default="17"),
     )
     op.add_column(
         "seasons",
