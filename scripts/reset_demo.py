@@ -67,17 +67,24 @@ with engine.connect() as conn:
             " WHERE role != 'super_admin' ORDER BY id"
         )
     ).fetchall()
+    season_count = conn.execute(text("SELECT COUNT(*) FROM seasons")).scalar() or 0
+    club_count = conn.execute(text("SELECT COUNT(*) FROM clubs")).scalar() or 0
 
-if not rows:
-    print("Nothing to reset — no non-super-admin users found.")
+if not rows and not season_count and not club_count:
+    print("Nothing to reset — database is already clean.")
     sys.exit(0)
 
 print("\n" + "=" * 60)
 print("  WFL DEMO RESET")
 print("=" * 60)
-print(f"\n  {len(rows)} user(s) will be permanently deleted:\n")
-for row in rows:
-    print(f"    [{row.id:>3}]  {row.email:<40}  {row.role}")
+if rows:
+    print(f"\n  {len(rows)} user(s) will be permanently deleted:\n")
+    for row in rows:
+        print(f"    [{row.id:>3}]  {row.email:<40}  {row.role}")
+else:
+    print("\n  No non-super-admin users found.")
+if season_count or club_count:
+    print(f"\n  Orphaned data: {season_count} season(s), {club_count} club(s)")
 print()
 print("  All clubs, seasons, players, registrations, releases,")
 print("  memberships, notifications, and audit logs will be wiped.")
