@@ -504,7 +504,7 @@ def seed(base: str, admin_email: str, admin_password: str) -> None:  # noqa: C90
     patch(
         base,
         f"/users/{la2_user['id']}/role/",
-        {"new_role": "club_admin", "club_id": la2_club_id},
+        {"new_role": "club_admin", "club_id": la2_club_id, "reason": "Demo seed"},
         admin_token,
     )
     print(
