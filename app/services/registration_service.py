@@ -115,11 +115,6 @@ def create_request(
         select(User).where(User.player_id == data.player_id)
     ).scalar_one_or_none()
 
-    # Look up the player's linked user for in-app notification and email.
-    player_user = db.execute(
-        select(User).where(User.player_id == data.player_id)
-    ).scalar_one_or_none()
-
     req = RegistrationRequest(
         season_id=data.season_id,
         club_id=data.club_id,
