@@ -27,6 +27,8 @@ class Season(Base):
     season_end_date: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    min_squad_size: Mapped[int] = mapped_column(Integer, default=5)
+    max_squad_size: Mapped[int] = mapped_column(Integer, default=30)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

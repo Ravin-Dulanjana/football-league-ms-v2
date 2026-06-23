@@ -104,8 +104,11 @@ def create_request(
         .scalars()
         .all()
     )
-    if len(squad_count) >= 30:
-        return None, "Maximum of 30 players per club per season already reached."
+    if len(squad_count) >= season.max_squad_size:
+        return (
+            None,
+            f"Club squad is full ({season.max_squad_size} players max per season).",
+        )
 
     # Look up the player's linked user for in-app notification and email.
     player_user = db.execute(

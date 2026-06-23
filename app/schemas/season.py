@@ -14,6 +14,8 @@ class SeasonRead(BaseModel):
     registration_open_at: datetime
     registration_close_at: datetime
     season_end_date: datetime | None
+    min_squad_size: int
+    max_squad_size: int
     is_locked: bool
     is_archived: bool
     status: SeasonStatus
@@ -28,6 +30,8 @@ class SeasonCreate(BaseModel):
     registration_open_at: datetime
     registration_close_at: datetime
     season_end_date: datetime | None = None
+    min_squad_size: int = 5
+    max_squad_size: int = 30
 
     @model_validator(mode="after")
     def check_date_order(self) -> SeasonCreate:
@@ -43,4 +47,6 @@ class SeasonUpdate(BaseModel):
     registration_open_at: datetime | None = None
     registration_close_at: datetime | None = None
     season_end_date: datetime | None = None
+    min_squad_size: int | None = None
+    max_squad_size: int | None = None
     is_archived: bool | None = None
