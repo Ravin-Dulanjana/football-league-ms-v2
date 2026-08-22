@@ -1,9 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIdMiddleware
+from app.rate_limit import limiter
 from app.routers import (
     audit_logs,
     auth,
@@ -24,6 +28,10 @@ from app.routers import (
 
 app = FastAPI(title="Football League MS v2")
 
+# slowapi — attach the limiter so @limiter.limit decorators can find it.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
 # Middleware is applied in reverse order of addition in Starlette.
 # RequestIdMiddleware is added SECOND so it becomes the outermost layer
 # and runs first — it sets request_id_var before LoggingMiddleware reads it.
@@ -35,6 +43,7 @@ app = FastAPI(title="Football League MS v2")
 # Request flow: CORSMiddleware → RequestIdMiddleware → LoggingMiddleware → route handler
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins.split(","),

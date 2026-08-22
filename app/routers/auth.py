@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.user import User
+from app.rate_limit import limiter
 from app.services import cognito
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -52,9 +53,13 @@ class TokenResponse(BaseModel):
 # Login has no response_model — it returns either TokenResponse fields OR
 # { challenge, session, email } for a NEW_PASSWORD_REQUIRED challenge.
 @router.post("/login")
-def login(data: LoginRequest) -> dict[str, Any]:
+@limiter.limit("5/minute")
+def login(request: Request, data: LoginRequest) -> dict[str, Any]:
     """
     Authenticate with email and password.
+
+    Rate-limited to 5 attempts per minute per client IP to slow brute-force.
+    Behind Nginx, X-Forwarded-For carries the real client IP.
 
     Normal response: Cognito tokens (use id_token as Bearer on subsequent calls).
     Challenge response: { challenge: "NEW_PASSWORD_REQUIRED", session, email }
