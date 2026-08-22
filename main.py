@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIdMiddleware
 from app.routers import (
@@ -26,9 +28,22 @@ app = FastAPI(title="Football League MS v2")
 # RequestIdMiddleware is added SECOND so it becomes the outermost layer
 # and runs first — it sets request_id_var before LoggingMiddleware reads it.
 #
-# Request flow: RequestIdMiddleware → LoggingMiddleware → route handler
+# CORSMiddleware must be outermost so it handles OPTIONS preflights before
+# auth middleware rejects unauthenticated requests. It is added LAST so it
+# wraps everything.
+#
+# Request flow: CORSMiddleware → RequestIdMiddleware → LoggingMiddleware → route handler
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins.split(","),
+    # allow_credentials=True is required because the Next.js BFF sends the
+    # httpOnly id-token cookie on cross-origin requests to this API.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Phase 1-6 routers
 app.include_router(auth.router)

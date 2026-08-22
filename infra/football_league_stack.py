@@ -72,6 +72,14 @@ class FootballLeagueStack(Stack):
         #          "false" → install PostgreSQL on EC2 (works on any account)
         use_rds: bool = self.node.try_get_context("use_rds") == "true"
 
+        # frontend_url: the deployed Vercel origin (no trailing slash).
+        # Used for CORS both on the FastAPI side and for S3 presigned-upload CORS.
+        # Set in cdk.json or pass via --context frontend_url=https://yourapp.vercel.app
+        # Defaults to localhost so `cdk deploy` without the flag doesn't break CI.
+        frontend_url: str = (
+            self.node.try_get_context("frontend_url") or "http://localhost:3000"
+        )
+
         # ---------------------------------------------------------------
         # 1. VPC
         #
@@ -155,10 +163,11 @@ class FootballLeagueStack(Stack):
                     # CORS is required for browser-based pre-signed POST uploads.
                     # The browser makes a cross-origin POST to s3.amazonaws.com;
                     # without CORS, the browser blocks the response.
-                    # Restrict allowed_origins to your domain before production.
+                    # Scoped to the actual frontend origin (set via --context
+                    # frontend_url=... or cdk.json) — not wildcard.
                     allowed_headers=["*"],
                     allowed_methods=[s3.HttpMethods.POST, s3.HttpMethods.PUT],
-                    allowed_origins=["*"],
+                    allowed_origins=[frontend_url],
                     max_age=3000,
                 )
             ],
@@ -850,6 +859,8 @@ class FootballLeagueStack(Stack):
             f'export COGNITO_JWKS_URL="{jwks_url}"',
             # Phase 7 — CloudWatch observability
             'export CLOUDWATCH_NAMESPACE="FootballLeague"',
+            # Security — CORS allowed origins (comma-separated, no trailing slash)
+            f'export ALLOWED_ORIGINS="{frontend_url}"',
         )
 
         script_path = os.path.join(os.path.dirname(__file__), "user_data.sh")

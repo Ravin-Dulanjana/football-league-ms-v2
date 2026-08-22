@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     ses_sender_email: str = ""
 
     # ------------------------------------------------------------------
+    # CORS — allowed origins for Access-Control-Allow-Origin.
+    #
+    # Comma-separated so multiple environments can be whitelisted:
+    #   ALLOWED_ORIGINS="https://yourapp.vercel.app,http://localhost:3000"
+    #
+    # Injected by CDK via .env on EC2. Defaults to localhost-only so
+    # local dev works out of the box without any .env entry.
+    # ------------------------------------------------------------------
+    allowed_origins: str = "http://localhost:3000"
+
+    # ------------------------------------------------------------------
     # Phase 7 — CloudWatch observability
     #
     # CLOUDWATCH_NAMESPACE: custom metric namespace for PutMetricData.
