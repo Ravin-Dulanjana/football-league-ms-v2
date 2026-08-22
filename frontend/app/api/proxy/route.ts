@@ -17,10 +17,33 @@ import { COOKIE_ID_TOKEN } from "@/lib/auth";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:8000";
 
+// ---------------------------------------------------------------------------
+// Path allowlist — only forward requests that look like valid API paths.
+//
+// Accepts:
+//   /seasons/          → plain paths
+//   /clubs/42/         → numeric IDs
+//   /players/?page=1   → query strings (alphanumeric + common URL chars)
+//
+// Rejects:
+//   http://...         → protocol prefix (SSRF / open-redirect)
+//   //evil.com/...     → protocol-relative URL
+//   /../../etc/passwd  → path traversal
+//   /path\x00suffix    → null bytes and other control chars
+//
+// The regex anchors at ^ and $, requires an initial slash, then allows only
+// the characters that legitimately appear in REST API paths and query strings.
+// ---------------------------------------------------------------------------
+const SAFE_PATH = /^\/[a-zA-Z0-9\-_./?&=%+]*$/;
+
 async function handler(req: NextRequest): Promise<NextResponse> {
   const path = req.nextUrl.searchParams.get("path");
   if (!path) {
     return NextResponse.json({ detail: "Missing path parameter" }, { status: 400 });
+  }
+
+  if (!SAFE_PATH.test(path)) {
+    return NextResponse.json({ detail: "Invalid path" }, { status: 400 });
   }
 
   const cookieStore = cookies();
