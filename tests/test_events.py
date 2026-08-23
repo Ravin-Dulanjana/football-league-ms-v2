@@ -1,12 +1,21 @@
 """
-Tests for app/services/events.py (publish_event) and the integration
-between service functions and event publishing.
+Tests for the Transactional Outbox pattern in app/services/events.py.
 
-Design:
-  - All existing tests keep passing because settings.sqs_queue_url defaults
-    to "" — publish_event short-circuits before touching boto3.
-  - Tests here set a fake queue URL via monkeypatch and mock boto3 so no
-    real AWS calls are ever made.
+Architecture
+────────────
+1. queue_event(db, event_type, payload)  — writes OutboxEvent row to DB.
+   Must be called BEFORE db.commit() so it's atomic with the business write.
+
+2. publish_pending(db)  — reads unsent rows, sends to SQS, marks sent=True.
+   Called by the APScheduler relay every ~300 ms.
+
+Test design
+───────────
+- All tests run against in-memory SQLite (the conftest.py fixture creates all
+  tables, including outbox_events, via Base.metadata.create_all).
+- SQS calls are mocked via unittest.mock — no real AWS calls.
+- settings.sqs_queue_url defaults to "" so queue_event skips silently;
+  tests that want to exercise the outbox set it via monkeypatch.
 """
 
 from __future__ import annotations
@@ -17,10 +26,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser, get_current_user
 from app.models.club import Club, ClubStatus
+from app.models.outbox import OutboxEvent
 from app.models.player import Player
 from app.models.registration import (
     PlayerSeasonRegistration,
@@ -126,26 +137,73 @@ def active_registration(
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — publish_event itself
+# Unit tests — queue_event
 # ---------------------------------------------------------------------------
 
 
-def test_publish_event_sends_correct_structure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """publish_event constructs the expected message envelope and calls send_message."""
+def test_queue_event_writes_outbox_row(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """queue_event inserts an OutboxEvent row with sent=False."""
     monkeypatch.setattr(events_module.settings, "sqs_queue_url", FAKE_QUEUE_URL)
+
+    events_module.queue_event(
+        db,
+        "registration.requested",
+        {"player_name": "Kamal", "recipient_email": "club@example.com"},
+    )
+    db.commit()
+
+    rows = db.execute(select(OutboxEvent)).scalars().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.event_type == "registration.requested"
+    assert row.sent is False
+    payload = json.loads(row.payload_json)
+    assert payload["player_name"] == "Kamal"
+
+
+def test_queue_event_skips_when_no_queue_url(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """queue_event writes nothing when SQS_QUEUE_URL is empty (local dev default)."""
+    monkeypatch.setattr(events_module.settings, "sqs_queue_url", "")
+
+    events_module.queue_event(db, "registration.requested", {})
+    db.commit()
+
+    rows = db.execute(select(OutboxEvent)).scalars().all()
+    assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — publish_pending (the relay)
+# ---------------------------------------------------------------------------
+
+
+def test_publish_pending_sends_correct_structure(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """publish_pending sends the expected message envelope to SQS."""
+    monkeypatch.setattr(events_module.settings, "sqs_queue_url", FAKE_QUEUE_URL)
+
+    # Insert an unsent outbox row directly (simulating what queue_event does).
+    row = OutboxEvent(
+        event_type="registration.requested",
+        payload_json=json.dumps({"player_name": "Kamal"}),
+        created_at=datetime.now(tz=UTC),
+    )
+    db.add(row)
+    db.commit()
 
     with patch("app.services.events.boto3") as mock_boto3:
         mock_sqs = MagicMock()
         mock_boto3.client.return_value = mock_sqs
 
-        events_module.publish_event(
-            "registration.requested",
-            {"player_name": "Kamal", "recipient_email": "club@example.com"},
-        )
+        events_module.publish_pending(db)
 
         mock_boto3.client.assert_called_once_with("sqs", region_name="ap-southeast-1")
         mock_sqs.send_message.assert_called_once()
-
         call_kwargs = mock_sqs.send_message.call_args[1]
         assert call_kwargs["QueueUrl"] == FAKE_QUEUE_URL
 
@@ -153,28 +211,27 @@ def test_publish_event_sends_correct_structure(monkeypatch: pytest.MonkeyPatch) 
         assert body["event_type"] == "registration.requested"
         assert body["version"] == "1.0"
         assert body["payload"]["player_name"] == "Kamal"
-        assert "timestamp" in body  # ISO 8601 string
+        assert "timestamp" in body
+
+    # Row should now be marked sent.
+    db.refresh(row)
+    assert row.sent is True
+    assert row.sent_at is not None
 
 
-def test_publish_event_skips_when_no_queue_url(
-    monkeypatch: pytest.MonkeyPatch,
+def test_publish_pending_survives_sqs_failure(
+    db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """publish_event does nothing when SQS_QUEUE_URL is empty (local dev default)."""
-    monkeypatch.setattr(events_module.settings, "sqs_queue_url", "")
-
-    with patch("app.services.events.boto3") as mock_boto3:
-        events_module.publish_event("registration.requested", {})
-        mock_boto3.client.assert_not_called()
-
-
-def test_publish_event_survives_sqs_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """
-    publish_event does NOT re-raise when SQS send_message throws.
-    The business transaction must not fail because SQS is unavailable.
-    """
+    """publish_pending does NOT reraise on SQS failure — row stays unsent for retry."""
     monkeypatch.setattr(events_module.settings, "sqs_queue_url", FAKE_QUEUE_URL)
+
+    row = OutboxEvent(
+        event_type="registration.requested",
+        payload_json=json.dumps({}),
+        created_at=datetime.now(tz=UTC),
+    )
+    db.add(row)
+    db.commit()
 
     with patch("app.services.events.boto3") as mock_boto3:
         mock_sqs = MagicMock()
@@ -182,62 +239,67 @@ def test_publish_event_survives_sqs_failure(
         mock_boto3.client.return_value = mock_sqs
 
         # Must not raise
-        events_module.publish_event("registration.requested", {})
+        events_module.publish_pending(db)
+
+    db.refresh(row)
+    assert row.sent is False  # not marked sent — will be retried next tick
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — event published from service functions via FastAPI
+# Integration tests — event queued from service functions via FastAPI
 # ---------------------------------------------------------------------------
 
 
-def test_accept_registration_publishes_accepted_event(
+def test_accept_registration_queues_accepted_event(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    db: Session,
     pending_request: RegistrationRequest,
     player: Player,
     club_with_email: Club,
     open_season: Season,
 ) -> None:
     """
-    When a player accepts a registration request, the service publishes a
-    'registration.accepted' event with the correct payload structure.
+    When a player accepts a registration request the service writes a
+    'registration.accepted' OutboxEvent row (the relay publishes it later).
     """
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         id=player.id, role="player", player_id=player.id
     )
     monkeypatch.setattr(events_module.settings, "sqs_queue_url", FAKE_QUEUE_URL)
 
-    with patch("app.services.events.boto3") as mock_boto3:
-        mock_sqs = MagicMock()
-        mock_boto3.client.return_value = mock_sqs
+    response = client.post(
+        f"/registration-requests/{pending_request.id}/decide/",
+        json={"decision": "accept"},
+    )
+    assert response.status_code == 200
 
-        response = client.post(
-            f"/registration-requests/{pending_request.id}/decide/",
-            json={"decision": "accept"},
+    rows = (
+        db.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "registration.accepted")
         )
-        assert response.status_code == 200
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    payload = json.loads(rows[0].payload_json)
+    assert payload["player_name"] == player.full_name
+    assert payload["club_name"] == club_with_email.name
+    assert payload["season_name"] == open_season.name
+    assert payload["recipient_email"] == club_with_email.email
 
-        mock_sqs.send_message.assert_called_once()
-        body = json.loads(mock_sqs.send_message.call_args[1]["MessageBody"])
 
-        assert body["event_type"] == "registration.accepted"
-        assert body["payload"]["player_name"] == player.full_name
-        assert body["payload"]["club_name"] == club_with_email.name
-        assert body["payload"]["season_name"] == open_season.name
-        assert body["payload"]["recipient_email"] == club_with_email.email
-
-
-def test_confirm_release_publishes_release_confirmed_event(
+def test_confirm_release_queues_release_confirmed_event(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    db: Session,
     active_registration: PlayerSeasonRegistration,
     player: Player,
     club_with_email: Club,
-    db: Session,
 ) -> None:
     """
-    When a player confirms a release, the service publishes a
-    'release.confirmed' event with the correct payload structure.
+    When a player confirms a release the service writes a 'release.confirmed'
+    OutboxEvent row.
     """
     release = PlayerRelease(
         registration_id=active_registration.id,
@@ -261,19 +323,20 @@ def test_confirm_release_publishes_release_confirmed_event(
     )
     monkeypatch.setattr(events_module.settings, "sqs_queue_url", FAKE_QUEUE_URL)
 
-    with patch("app.services.events.boto3") as mock_boto3:
-        mock_sqs = MagicMock()
-        mock_boto3.client.return_value = mock_sqs
+    response = client.post(
+        f"/releases/{release.id}/decide/", json={"decision": "confirm"}
+    )
+    assert response.status_code == 200
 
-        response = client.post(
-            f"/releases/{release.id}/decide/", json={"decision": "confirm"}
+    rows = (
+        db.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "release.confirmed")
         )
-        assert response.status_code == 200
-
-        mock_sqs.send_message.assert_called_once()
-        body = json.loads(mock_sqs.send_message.call_args[1]["MessageBody"])
-
-        assert body["event_type"] == "release.confirmed"
-        assert body["payload"]["player_name"] == player.full_name
-        assert body["payload"]["club_name"] == club_with_email.name
-        assert body["payload"]["recipient_email"] == club_with_email.email
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    payload = json.loads(rows[0].payload_json)
+    assert payload["player_name"] == player.full_name
+    assert payload["club_name"] == club_with_email.name
+    assert payload["recipient_email"] == club_with_email.email

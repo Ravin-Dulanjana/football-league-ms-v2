@@ -11,6 +11,7 @@ from app.models.club_season import (
 )
 from app.models.league_info import LeagueInfo
 from app.models.notification import Notification, NotificationPreference
+from app.models.outbox import OutboxEvent
 from app.models.player import Player
 from app.models.registration import PlayerSeasonRegistration, RegistrationRequest
 from app.models.release import PlayerRelease, ReleaseDocument
@@ -21,6 +22,7 @@ from app.models.user_governance_role import UserGovernanceRole
 __all__ = [
     "AuditLog",
     "Base",
+    "OutboxEvent",
     "Club",
     "ClubSeasonComment",
     "ClubSeasonProfile",

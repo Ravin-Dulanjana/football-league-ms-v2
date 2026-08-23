@@ -21,7 +21,7 @@ from app.models.user import User
 from app.models.user_governance_role import UserGovernanceRole
 from app.schemas.release import PlayerDocumentCreate, ReleaseCreate
 from app.services import audit_service
-from app.services.events import publish_event
+from app.services.events import queue_event
 from app.services.notification_service import notify_user
 from app.services.user_service import highest_role
 
@@ -196,6 +196,17 @@ def create_release(
                 f"You have been released from {club_name}. You are now a free player."
             ),
         )
+    # Queue event inside the same transaction — written atomically with the release.
+    queue_event(
+        db,
+        "release.confirmed",
+        {
+            "release_id": release.id,
+            "player_name": player_name,
+            "club_name": club_name,
+            "recipient_email": player_email,
+        },
+    )
     db.commit()
     db.refresh(release)
     logger.info(
@@ -205,17 +216,6 @@ def create_release(
             "player_id": release.player_id,
             "request_id": request_id_var.get(),
         }
-    )
-
-    # Email the released player.
-    publish_event(
-        "release.confirmed",
-        {
-            "release_id": release.id,
-            "player_name": player_name,
-            "club_name": club_name,
-            "recipient_email": player_email,
-        },
     )
 
     return release, None
@@ -268,6 +268,17 @@ def decide_release(
         entity_type="PlayerRelease",
         entity_id=release.id,
     )
+    # Queue event inside the same transaction — written atomically with the decision.
+    queue_event(
+        db,
+        "release.confirmed",
+        {
+            "release_id": release.id,
+            "player_name": release.player.full_name,
+            "club_name": release.from_club.name,
+            "recipient_email": release.from_club.email,
+        },
+    )
     db.commit()
     db.refresh(release)
     logger.info(
@@ -277,15 +288,6 @@ def decide_release(
             "outcome": "confirmed",
             "request_id": request_id_var.get(),
         }
-    )
-    publish_event(
-        "release.confirmed",
-        {
-            "release_id": release.id,
-            "player_name": release.player.full_name,
-            "club_name": release.from_club.name,
-            "recipient_email": release.from_club.email,
-        },
     )
     return release, None
 

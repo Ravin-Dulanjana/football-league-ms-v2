@@ -31,7 +31,7 @@ from app.models.season import Season
 from app.models.user import User
 from app.schemas.club_membership import ClubMembershipRequestCreate
 from app.services import audit_service
-from app.services.events import publish_event
+from app.services.events import queue_event
 from app.services.notification_service import notify_club_admins, notify_user
 
 logger = get_logger(__name__)
@@ -132,6 +132,17 @@ def create_invite(
             event_type="club_membership.invited",
             message=f"You have been invited to join {club_name}.",
         )
+    # Queue event inside the same transaction — written atomically with the invite.
+    queue_event(
+        db,
+        "club_membership.invited",
+        {
+            "membership_request_id": req.id,
+            "player_id": data.player_id,
+            "club_name": club_name,
+            "recipient_email": invited_user.email if invited_user else None,
+        },
+    )
     db.commit()
     db.refresh(req)
     logger.info(
@@ -140,15 +151,6 @@ def create_invite(
             "request_id_db": req.id,
             "request_id": request_id_var.get(),
         }
-    )
-    publish_event(
-        "club_membership.invited",
-        {
-            "membership_request_id": req.id,
-            "player_id": data.player_id,
-            "club_name": club_name,
-            "recipient_email": invited_user.email if invited_user else None,
-        },
     )
     return req, None
 
@@ -250,9 +252,9 @@ def decide_invite(
             message=f"{player_name} has declined your club invite to {club_name}.",
         )
 
-    db.commit()
-    db.refresh(req)
-    publish_event(
+    # Queue event inside the same transaction — written atomically with the decision.
+    queue_event(
+        db,
         f"club_membership.{decision}ed",
         {
             "membership_request_id": req.id,
@@ -262,6 +264,8 @@ def decide_invite(
             "recipient_email": club_email,
         },
     )
+    db.commit()
+    db.refresh(req)
     return req, None
 
 

@@ -1,3 +1,6 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -25,8 +28,17 @@ from app.routers import (
     seasons,
     users,
 )
+from app.services import outbox_relay
 
-app = FastAPI(title="Football League MS v2")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
+    outbox_relay.start()
+    yield
+    outbox_relay.stop()
+
+
+app = FastAPI(title="Football League MS v2", lifespan=lifespan)
 
 # slowapi — attach the limiter so @limiter.limit decorators can find it.
 app.state.limiter = limiter

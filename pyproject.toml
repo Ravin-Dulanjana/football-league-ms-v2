@@ -26,6 +26,8 @@ dependencies = [
     "httpx>=0.27.0",
     # Rate limiting — /auth/login endpoint
     "slowapi>=0.1.9",
+    # Background scheduler for the Transactional Outbox relay
+    "apscheduler>=3.10.0",
 ]
 
 [project.optional-dependencies]
@@ -84,7 +86,7 @@ ignore_missing_imports = true  # don't fail on third-party libs with no stubs
 plugins = ["sqlalchemy.ext.mypy.plugin"]  # teaches mypy how SQLAlchemy ORM types work
 # alembic/ uses runtime-injected op/context objects mypy can't see statically.
 # infra/ is CDK code whose library types aren't in the app venv.
-exclude = ["alembic/", "infra/"]
+exclude = ["alembic/", "migrations/", "infra/"]
 
 # ---------------------------------------------------------------------------
 # pytest
