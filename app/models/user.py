@@ -74,6 +74,11 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Set on logout.  get_current_user rejects tokens issued before this
+    # timestamp so the revocation gap from Cognito GlobalSignOut is closed.
+    last_logout_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
