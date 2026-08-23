@@ -18,6 +18,14 @@ Phase 4 additions (all modes):
       can read from S3; clients never hit the bucket directly
     IAM role S3 policy — scoped to this specific bucket (was resources=["*"])
 
+Security hardening (all modes, documented):
+    CORS — FastAPI CORSMiddleware + S3 CORS scoped to frontend_url env var
+    Rate limiting — slowapi on /auth/login (5/minute per client IP)
+    CSP headers — next.config.mjs security headers for the BFF
+    Proxy path validation — SAFE_PATH allowlist on /api/proxy
+    S3 upload scan — ClamAV-in-Lambda approach documented in stack section 3b
+                     (not provisioned; uncomment CDK snippet to enable)
+
 Phase 7 additions (all modes):
     CloudWatch Log Groups — /football-league/api (30 day retention)
                             /football-league/lambda (30 day retention)
@@ -172,6 +180,80 @@ class FootballLeagueStack(Stack):
                 )
             ],
         )
+
+        # ---------------------------------------------------------------
+        # 3b. S3 Upload Scan — ClamAV-in-Lambda (DOCUMENTED; NOT PROVISIONED)
+        #
+        # WHY:
+        #   Users upload release documents (player contracts, medical clearances)
+        #   via pre-signed POST. An attacker with a valid token could upload a
+        #   malicious file that another admin then downloads. Without scanning,
+        #   the API acts as an unwitting malware relay.
+        #
+        # RECOMMENDED APPROACH — ClamAV Lambda trigger:
+        #
+        #   1. An S3 ObjectCreated event triggers a Lambda immediately after upload.
+        #   2. The Lambda downloads the object into /tmp (ephemeral, up to 512 MB),
+        #      runs `clamscan --no-summary`, and inspects the exit code:
+        #        0 = clean   → tag the object  s3:virus-scan = clean
+        #        1 = virus   → delete the object; log the key + bucket
+        #        2 = error   → tag the object   s3:virus-scan = error; alert
+        #   3. The app only serves files whose  s3:virus-scan  tag is "clean".
+        #      Unscanned objects (tag absent) and infected objects are blocked.
+        #
+        # LIGHTWEIGHT LAMBDA PACKAGING:
+        #   Use the community ClamAV Lambda layer approach:
+        #     a) Pre-compile ClamAV for Amazon Linux 2023 or use the public
+        #        layer: arn:aws:lambda:ap-southeast-1:<acct>:layer:clamav
+        #     b) Bundle freshclam + virus definitions in an S3-backed layer
+        #        (~100 MB). Refresh daily via a scheduled Lambda (freshclam)
+        #        that uploads the updated database to a definitions bucket.
+        #     c) The scan Lambda mounts the definitions layer (/opt/clamav)
+        #        — no binary in the zip needed.
+        #
+        # CDK WIRING (to enable, uncomment and adapt):
+        #
+        #   scan_fn = lambda_.Function(
+        #       self, "UploadScanFn",
+        #       runtime=lambda_.Runtime.PYTHON_3_11,
+        #       handler="scan_handler.handler",
+        #       code=lambda_.Code.from_asset(
+        #           os.path.join(os.path.dirname(__file__), "lambda_scan")
+        #       ),
+        #       timeout=Duration.seconds(120),  # clamscan can take 60-90 s
+        #       memory_size=1024,               # ClamAV loads sigs into RAM
+        #       ephemeral_storage_size=Size.mebibytes(512),
+        #       environment={"MEDIA_BUCKET": media_bucket.bucket_name},
+        #   )
+        #   # Lambda needs read, delete, and tag-write on the media bucket.
+        #   media_bucket.grant_read(scan_fn)
+        #   media_bucket.grant_delete(scan_fn)
+        #   scan_fn.add_to_role_policy(iam.PolicyStatement(
+        #       actions=["s3:PutObjectTagging"],
+        #       resources=[f"{media_bucket.bucket_arn}/*"],
+        #   ))
+        #   # Fire on every upload; add prefix= to scope to a folder.
+        #   scan_fn.add_event_source(event_sources.S3EventSource(
+        #       media_bucket,
+        #       events=[s3.EventType.OBJECT_CREATED],
+        #   ))
+        #
+        # APP-SIDE ENFORCEMENT:
+        #   Before issuing a pre-signed download URL check the tag:
+        #
+        #     tags = s3_client.get_object_tagging(Bucket=bucket, Key=key)
+        #     tag_map = {t["Key"]: t["Value"] for t in tags["TagSet"]}
+        #     if tag_map.get("virus-scan") != "clean":
+        #         raise HTTPException(
+        #             status.HTTP_403_FORBIDDEN,
+        #             "File not yet scanned or infected",
+        #         )
+        #
+        # COST ESTIMATE (low-volume):
+        #   ~10 uploads/day × 120 s × 1 GB-s = ~360 GB-s/month
+        #   Free tier covers 400,000 GB-s/month → effectively zero cost.
+        #   ClamAV definitions S3 storage ~200 MB — $0.005/month.
+        # ---------------------------------------------------------------
 
         # ---------------------------------------------------------------
         # 4. CloudFront Distribution with OAC
