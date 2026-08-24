@@ -35,3 +35,6 @@ env/
 # AWS CDK
 infra/cdk.out/
 infra/.venv/
+
+# Next.js build output (frontend dev server)
+.next/
