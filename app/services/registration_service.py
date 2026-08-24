@@ -18,7 +18,7 @@ from app.models.registration import (
 from app.models.user import User
 from app.schemas.registration import RegistrationRequestCreate
 from app.services import audit_service
-from app.services.events import publish_event
+from app.services.events import queue_event
 from app.services.notification_service import notify_club_admins, notify_user
 
 logger = get_logger(__name__)
@@ -150,18 +150,9 @@ def create_request(
                 "Log in to acknowledge your registration."
             ),
         )
-    db.commit()
-    db.refresh(req)
-    logger.info(
-        {
-            "event": "create_registration_request.complete",
-            "request_id_db": req.id,
-            "request_id": request_id_var.get(),
-        }
-    )
-
-    # Email the player — they need to acknowledge the request.
-    publish_event(
+    # Queue event inside the same transaction — written atomically with the request.
+    queue_event(
+        db,
         "registration.requested",
         {
             "registration_request_id": req.id,
@@ -173,6 +164,15 @@ def create_request(
             "season_name": season_name,
             "recipient_email": player_user.email if player_user else None,
         },
+    )
+    db.commit()
+    db.refresh(req)
+    logger.info(
+        {
+            "event": "create_registration_request.complete",
+            "request_id_db": req.id,
+            "request_id": request_id_var.get(),
+        }
     )
 
     return req, None
@@ -242,6 +242,18 @@ def decide_request(
             f"{club_name} in {season_name}."
         ),
     )
+    # Queue event inside the same transaction — written atomically with the decision.
+    queue_event(
+        db,
+        "registration.accepted",
+        {
+            "registration_request_id": req.id,
+            "player_name": player_name,
+            "club_name": club_name,
+            "season_name": season_name,
+            "recipient_email": club_email,
+        },
+    )
     db.commit()  # single commit — both changes land together or neither does
     db.refresh(req)
     logger.info(
@@ -251,16 +263,5 @@ def decide_request(
             "outcome": "accepted",
             "request_id": request_id_var.get(),
         }
-    )
-    # Email the club (contact address) that the player acknowledged.
-    publish_event(
-        "registration.accepted",
-        {
-            "registration_request_id": req.id,
-            "player_name": player_name,
-            "club_name": club_name,
-            "season_name": season_name,
-            "recipient_email": club_email,
-        },
     )
     return req, None

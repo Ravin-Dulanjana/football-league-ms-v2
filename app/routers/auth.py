@@ -9,9 +9,11 @@ POST /auth/logout             — revoke refresh token via GlobalSignOut
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+import jwt as pyjwt
+from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -19,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.user import User
+from app.rate_limit import limiter
 from app.services import cognito
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -52,9 +55,13 @@ class TokenResponse(BaseModel):
 # Login has no response_model — it returns either TokenResponse fields OR
 # { challenge, session, email } for a NEW_PASSWORD_REQUIRED challenge.
 @router.post("/login")
-def login(data: LoginRequest) -> dict[str, Any]:
+@limiter.limit("5/minute")
+def login(request: Request, data: LoginRequest) -> dict[str, Any]:
     """
     Authenticate with email and password.
+
+    Rate-limited to 5 attempts per minute per client IP to slow brute-force.
+    Behind Nginx, X-Forwarded-For carries the real client IP.
 
     Normal response: Cognito tokens (use id_token as Bearer on subsequent calls).
     Challenge response: { challenge: "NEW_PASSWORD_REQUIRED", session, email }
@@ -101,15 +108,34 @@ def refresh_token(data: RefreshRequest) -> dict[str, Any]:
 @router.post("/logout", status_code=204)
 def logout(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: Session = Depends(get_db),
 ) -> None:
     """
     Revoke all tokens for the authenticated user via Cognito GlobalSignOut.
 
     Requires the ACCESS token (not the ID token) in the Authorization header.
 
-    ⚠️  Revocation gap: the ID token and access token remain valid until their
-    `exp` claim (up to 1 hour). The refresh token is revoked immediately so
-    the user cannot get new tokens, but existing tokens are still accepted by
-    any service that validates them independently (including this API).
+    After calling GlobalSignOut the refresh token is immediately revoked.
+    The ID/access tokens would normally remain valid until their `exp` (up to
+    1 hour), but we close this gap by stamping `last_logout_at` on the User
+    row.  get_current_user rejects any token whose `iat` is before that
+    timestamp, so the user is effectively logged out immediately.
     """
-    cognito.logout(credentials.credentials)
+    access_token = credentials.credentials
+    cognito.logout(access_token)
+
+    # Decode the access token (no signature verification — GlobalSignOut already
+    # validated it server-side) to extract the Cognito sub and find the User row.
+    try:
+        claims = pyjwt.decode(access_token, options={"verify_signature": False})
+        cognito_sub: str = claims.get("sub", "")
+    except Exception:
+        cognito_sub = ""
+
+    if cognito_sub:
+        user = db.execute(
+            select(User).where(User.cognito_sub == cognito_sub)
+        ).scalar_one_or_none()
+        if user is not None:
+            user.last_logout_at = datetime.now(tz=UTC)
+            db.commit()

@@ -1,7 +1,16 @@
-from fastapi import FastAPI
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+from app.config import settings
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIdMiddleware
+from app.rate_limit import limiter
 from app.routers import (
     audit_logs,
     auth,
@@ -19,16 +28,43 @@ from app.routers import (
     seasons,
     users,
 )
+from app.services import outbox_relay
 
-app = FastAPI(title="Football League MS v2")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
+    outbox_relay.start()
+    yield
+    outbox_relay.stop()
+
+
+app = FastAPI(title="Football League MS v2", lifespan=lifespan)
+
+# slowapi — attach the limiter so @limiter.limit decorators can find it.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 # Middleware is applied in reverse order of addition in Starlette.
 # RequestIdMiddleware is added SECOND so it becomes the outermost layer
 # and runs first — it sets request_id_var before LoggingMiddleware reads it.
 #
-# Request flow: RequestIdMiddleware → LoggingMiddleware → route handler
+# CORSMiddleware must be outermost so it handles OPTIONS preflights before
+# auth middleware rejects unauthenticated requests. It is added LAST so it
+# wraps everything.
+#
+# Request flow: CORSMiddleware → RequestIdMiddleware → LoggingMiddleware → route handler
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins.split(","),
+    # allow_credentials=True is required because the Next.js BFF sends the
+    # httpOnly id-token cookie on cross-origin requests to this API.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Phase 1-6 routers
 app.include_router(auth.router)

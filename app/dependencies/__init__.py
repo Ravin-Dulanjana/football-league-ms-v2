@@ -255,10 +255,29 @@ def get_current_user(
 
     claims = _decode_token(credentials.credentials)
 
-    # Lazy import to avoid circular imports (user_sync imports from app.models)
+    # Lazy imports to avoid circular imports (user_sync imports from app.models)
+    from app.models.user import User  # noqa: PLC0415
     from app.services import user_sync  # noqa: PLC0415
 
     user = user_sync.get_or_create_user(db, claims)
+
+    # Token revocation check — close the GlobalSignOut gap.
+    # get_or_create_user returns CurrentUser (thin data class), so we query
+    # the DB row for last_logout_at. One extra indexed lookup per request.
+    from sqlalchemy import select  # noqa: PLC0415
+
+    db_user = db.execute(
+        select(User.last_logout_at).where(User.id == user.id)
+    ).scalar_one_or_none()
+    if db_user is not None:
+        token_iat: int = claims.get("iat", 0)
+        if token_iat < db_user.timestamp():
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Token has been revoked — please log in again",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     # Store on request.state so LoggingMiddleware can read it without
     # re-parsing the token. getattr(request.state, "user_id", None) is
     # safe for overridden dependencies in tests that don't set this.
